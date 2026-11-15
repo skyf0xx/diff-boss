@@ -2,6 +2,10 @@
   "name": "diff-boss",
   "displayName": "diff-boss",
   "description": "Turns unstaged Git hunks into a validated, stage-by-stage review plan, then stages, discards and commits each stage from one review view.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skyf0xx/diff-boss.git"
+  },
   "publisher": "diff-boss",
   "version": "0.0.0",
   "private": true,
