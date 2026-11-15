@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, unlinkSync, chmodSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, unlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GitCommandError } from "../contract/ports";
 import { GitCliPort, GitScratchIndex } from "./index";
+import { parseDiff, unquotePath } from "./parse";
 
 const savedEnv: Record<string, string | undefined> = {};
 const ENV = {
@@ -431,5 +432,68 @@ describe("outside a repository", () => {
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+describe("untracked nested repositories", () => {
+  it("collects the other hunks and never reports a directory", async () => {
+    write("a.txt", base);
+    commitAll();
+    write("a.txt", twoEdits);
+    write("new.txt", "new\n");
+    mkdirSync(join(dir, "nested"));
+    execFileSync("git", ["init", "-q"], { cwd: join(dir, "nested") });
+    writeFileSync(join(dir, "nested", "inner.txt"), "inner\n");
+    const { hunks } = await git.collect();
+    expect(hunks.length).toBeGreaterThanOrEqual(3);
+    expect(hunks.some((h) => h.file === "new.txt")).toBe(true);
+    expect(hunks.some((h) => h.file === "a.txt")).toBe(true);
+    for (const h of hunks) expect(h.file.endsWith("/")).toBe(false);
+  });
+});
+
+describe("quoted paths", () => {
+  it("unquotes C-style escapes", () => {
+    expect(unquotePath('"we\\"ird"')).toBe('we"ird');
+    expect(unquotePath('"a\\\\b\\tc\\nd"')).toBe("a\\b\tc\nd");
+    expect(unquotePath('"caf\\303\\251"')).toBe("caf\u00e9");
+    expect(unquotePath("plain")).toBe("plain");
+  });
+
+  it("reads the path from a quoted diff --git line with no ---/+++ lines", () => {
+    const hunks = parseDiff('diff --git "a/we\\"ird" "b/we\\"ird"\nnew file mode 100644\nindex 0000000..e69de29\n');
+    expect(hunks[0]!.file).toBe('we"ird');
+  });
+
+  it("collects, stages and unstages a file named with a double quote", async () => {
+    write('we"ird', "one\ntwo\nthree\n");
+    commitAll();
+    write('we"ird', "one\nTWO\nthree\n");
+    const { hunks } = await git.collect();
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]!.file).toBe('we"ird');
+    await git.stage(hunks[0]!);
+    expect(sh("diff", "--cached", "--name-only", "-z")).toBe('we"ird\0');
+    await git.unstage(hunks[0]!);
+    expect(staged()).toBe("");
+  });
+
+  it("collects an untracked file named with a double quote", async () => {
+    write("k.txt", "k\n");
+    commitAll();
+    write('we"ird', "x\n");
+    const { hunks } = await git.collect();
+    expect(hunks.map((h) => h.file)).toEqual(['we"ird']);
+    await git.stage(hunks[0]!);
+    expect(sh("diff", "--cached", "--name-only", "-z")).toBe('we"ird\0');
+  });
+
+  it("renames of quoted paths report the new name", async () => {
+    write('we"ird', "one\ntwo\nthree\nfour\nfive\n");
+    commitAll();
+    sh("mv", 'we"ird', 'we"ird2');
+    sh("add", "-A");
+    const text = sh("-c", "core.quotepath=false", "diff", "--cached", "-M", "--src-prefix=a/", "--dst-prefix=b/");
+    expect(parseDiff(text)[0]!.file).toBe('we"ird2');
   });
 });

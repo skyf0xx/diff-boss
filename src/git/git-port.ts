@@ -61,6 +61,8 @@ export class GitCliPort implements GitPort {
 
     const listed = await runGitChecked([...READ, "ls-files", "--others", "--exclude-standard", "-z"], { cwd });
     for (const file of listed.stdout.split("\0").filter(Boolean)) {
+      // A nested repository is listed as `dir/`; it has no patch of its own.
+      if (file.endsWith("/")) continue;
       hunks.push(...(await this.untrackedHunks(cwd, file)));
     }
     return { hunks, recentCommits: await this.recentCommits() };
@@ -73,6 +75,7 @@ export class GitCliPort implements GitPort {
 
     // git prints nothing for an empty file, but it must still be stageable.
     const info = await stat(`${cwd}/${file}`);
+    if (!info.isFile()) return [];
     const mode = info.mode & 0o111 ? "100755" : "100644";
     const header =
       `diff --git a/${file} b/${file}\nnew file mode ${mode}\nindex 0000000..e69de29\n`;
