@@ -1,0 +1,15 @@
+{
+  "task": "DIFF-BOSS-EXTENSION",
+  "notes": [
+    {
+      "kind": "decision",
+      "note": "Discard: the host sends the dependent hunk numbers with the confirm request (computed from the plan's needs) and discards after the developer confirms; never blocked.",
+      "logged_at": "2026-11-15T05:58:26.517Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Working tree drift: before every stage/unstage/discard, run git apply --check for that hunk. If it fails, refuse the action and show 'Files changed since this plan was made' with a Rerun review button that recollects hunks and replans. No file watcher, no plan merging.",
+      "logged_at": "2026-11-15T05:58:26.885Z"
+    }
+  ]
+}

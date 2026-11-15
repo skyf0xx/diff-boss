@@ -1,0 +1,15 @@
+{
+  "task": "DIFF-BOSS-CONTRACT",
+  "notes": [
+    {
+      "kind": "decision",
+      "note": "Discard warns, then discards; never blocked. When later hunks in the plan list the hunk in needs, the host sends their numbers with the confirm request and the webview's confirmation names them ('Hunks 4 and 6 need this hunk'). With no dependents, a plain confirmation. The contract's host<->webview messages carry the dependent hunk numbers.",
+      "logged_at": "2026-11-15T05:58:43.794Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Working tree drift (edge case, keep it minimal): before every stage/unstage/discard the host runs git apply --check for that hunk. On failure the action is refused and the host sends a 'stale' state; the webview shows a 'Files changed since this plan was made' banner with a Rerun review button (recollect hunks + replan) and disables actions until the rerun completes. No file watcher, no plan merging. The contract's messages include the stale state and the rerun request.",
+      "logged_at": "2026-11-15T05:58:44.169Z"
+    }
+  ]
+}

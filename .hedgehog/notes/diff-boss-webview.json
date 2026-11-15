@@ -1,0 +1,15 @@
+{
+  "task": "DIFF-BOSS-WEBVIEW",
+  "notes": [
+    {
+      "kind": "decision",
+      "note": "Discard: when later hunks in the plan list this hunk in needs, the confirmation names them by number (e.g. 'Hunks 4 and 6 need this hunk') and discards on confirm. With no dependents, a plain confirmation. Discard is never blocked.",
+      "logged_at": "2026-11-15T05:58:26.138Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Working tree drift: render the host's 'Files changed since this plan was made' state as a banner with a Rerun review button; actions stay disabled until the rerun completes.",
+      "logged_at": "2026-11-15T05:58:27.263Z"
+    }
+  ]
+}
