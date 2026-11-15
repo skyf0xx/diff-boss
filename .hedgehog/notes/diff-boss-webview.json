@@ -10,6 +10,11 @@
       "kind": "decision",
       "note": "Working tree drift: render the host's 'Files changed since this plan was made' state as a banner with a Rerun review button; actions stay disabled until the rerun completes.",
       "logged_at": "2026-11-15T05:58:27.263Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Host loading of dist/webview/index.html: rewrite src=\"./assets/…\" and href=\"./assets/…\" to webview.asWebviewUri(...), localResourceRoots = dist/webview, inject nonce=\"<n>\" into the module script tag, CSP: default-src 'none'; script-src 'nonce-<n>' ${cspSource}; style-src ${cspSource}; font-src ${cspSource}; img-src ${cspSource} data:. The webview posts 'ready' on mount; send the current state in reply.",
+      "logged_at": "2026-11-15T06:14:59.272Z"
     }
   ]
 }
