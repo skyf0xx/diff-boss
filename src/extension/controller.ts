@@ -149,7 +149,7 @@ export class ReviewController {
         return;
       }
       this.hunks = new Map(input.hunks.map((h) => [h.id, h]));
-      this.state = buildReviewState(result.plan, input.hunks);
+      this.state = buildReviewState(result.plan, input.hunks, result.warnings);
       this.emitState();
     } catch (err) {
       if (run !== this.generation) return;
