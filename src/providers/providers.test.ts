@@ -15,6 +15,7 @@ import {
   buildSystemPrompt,
   createDefaultRegistry,
   loadSkill,
+  unwrapCodeFence,
 } from "./index";
 import type { ClaudeQueryFn } from "./index";
 import { fleschKincaidGrade } from "../plan/readability";
@@ -86,13 +87,14 @@ describe("loadSkill", () => {
 });
 
 describe("skill content", () => {
-  it("uses the corrected grade wording everywhere", async () => {
+  it("describes the reading grade as a flag, not a limit, everywhere", async () => {
     const s = await loadSkill(SKILL_DIR);
     const all = [s.body, ...Object.values(s.references)].join("\n");
     expect(all).not.toMatch(/7 or lower/i);
-    expect(s.references["PLAN.md"]).toMatch(/aim for 7, the limit is 8/);
-    expect(s.references["WRITING.md"]).toMatch(/aim for 7, the limit is 8/);
-    expect(s.body).toMatch(/limit is 8/);
+    expect(all).not.toMatch(/the limit is 8/);
+    expect(s.references["PLAN.md"]).toMatch(/Reading grade: aim for 7\. Above 8 is flagged in the review, not rejected/);
+    expect(s.references["WRITING.md"]).toMatch(/aim for 7\. Above 8 is flagged as hard to read/);
+    expect(s.body).toMatch(/Aim for reading grade 7; above 8 is flagged as hard to read/);
   });
 
   it("references files that exist and has frontmatter", async () => {
@@ -122,13 +124,14 @@ describe("skill content", () => {
       "✗ stages[i].hunks: the stage has no hunks",
       "✗ hunks[<id>].summary: <n> words, the limit is 20",
       "✗ hunks[<id>].summary: it must be one sentence",
-      "✗ hunks[<id>].summary: reading grade <n>, the limit is 8",
       "✗ hunks[<id>].needs: <other> isn't a hunk in the plan",
       "✗ hunks[<id>].needs: <other> is the hunk itself",
       "✗ hunks[<id>].needs: <other> comes later",
       "✗ order: <id> doesn't apply after the hunks before it",
     ];
     for (const m of messages) expect(plan, m).toContain(m);
+    expect(plan).not.toMatch(/✗ hunks\[<id>\]\.summary: reading grade/);
+    expect(plan).toMatch(/Above 8 is flagged in the review, not rejected/);
   });
 
   it("keeps every example summary inside the validator limits", async () => {
@@ -170,6 +173,14 @@ describe("InMemoryProviderRegistry", () => {
 });
 
 describe("ClaudeAgentProvider", () => {
+  it("unwraps one code fence around the whole reply", async () => {
+    const { query } = fakeQuery([result('```json\n{"stages":[]}\n```\n')]);
+    expect(await new ClaudeAgentProvider({ query }).generatePlan(input, skill)).toBe('{"stages":[]}');
+    expect(unwrapCodeFence('```\n{"a":1}\n```')).toBe('{"a":1}');
+    expect(unwrapCodeFence('Here it is:\n```json\n{}\n```')).toBe('Here it is:\n```json\n{}\n```');
+    expect(unwrapCodeFence('{"a":"```"}')).toBe('{"a":"```"}');
+  });
+
   it("returns the raw final text untouched", async () => {
     const { query } = fakeQuery([result('  {"stages":[]}\n')]);
     const p = new ClaudeAgentProvider({ query });
@@ -202,6 +213,27 @@ describe("ClaudeAgentProvider", () => {
     expect(prompt).toMatch(/Fix every line above and return the whole plan again/);
   });
 
+  it("sends its previous reply back on a retry and forgets it on a fresh plan", async () => {
+    const replies = ['{"stages":["first"]}', '{"stages":["second"]}', '{"stages":["third"]}'];
+    const prompts: string[] = [];
+    const query: ClaudeQueryFn = (params) => {
+      prompts.push(params.prompt);
+      const text = replies[prompts.length - 1]!;
+      return (async function* () {
+        yield result(text);
+      })();
+    };
+    const p = new ClaudeAgentProvider({ query });
+    const problems = [{ field: "hunks", message: "x isn't in any stage, add it" }];
+    await p.generatePlan(input, skill);
+    await p.generatePlan(input, skill, problems);
+    expect(prompts[1]).toContain('This is the plan you returned last time:\n\n{"stages":["first"]}');
+    expect(prompts[1]).toContain("✗ hunks: x isn't in any stage, add it");
+    expect(prompts[1]).toMatch(/Change only what these lines name/);
+    await p.generatePlan(input, skill);
+    expect(prompts[2]).not.toContain("returned last time");
+  });
+
   it("disables tools and one-shots the session", async () => {
     const { query, calls } = fakeQuery([result("{}")]);
     await new ClaudeAgentProvider({ query }).generatePlan(input, skill);
@@ -210,6 +242,27 @@ describe("ClaudeAgentProvider", () => {
     expect(o.maxTurns).toBe(1);
     expect(o.settingSources).toEqual([]);
     expect(o.persistSession).toBe(false);
+    expect(o.thinking).toEqual({ type: "disabled" });
+    expect(o.mcpServers).toEqual({});
+    expect(o.strictMcpConfig).toBe(true);
+    expect(o.env?.ENABLE_CLAUDEAI_MCP_SERVERS).toBe("false");
+    expect(o.abortController).toBeInstanceOf(AbortController);
+  });
+
+  it("aborts an attempt that runs past the timeout and reports it", async () => {
+    let signal: AbortSignal | undefined;
+    const query: ClaudeQueryFn = (params) => {
+      signal = params.options?.abortController?.signal;
+      return (async function* () {
+        await new Promise((_, reject) => signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+      })();
+    };
+    const err = await new ClaudeAgentProvider({ query, timeoutMs: 20 })
+      .generatePlan(input, skill)
+      .catch((e: unknown) => e);
+    expect(signal?.aborted).toBe(true);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect((err as Error).message).toBe("Claude did not answer within 1 s");
   });
 
   it("uses the default model and honours the constructor option", async () => {
@@ -227,7 +280,7 @@ describe("ClaudeAgentProvider", () => {
     const env = { PATH: "/bin", HOME: "/h", ANTHROPIC_API_KEY: "sk-secret", ANTHROPIC_AUTH_TOKEN: "tok" };
     await new ClaudeAgentProvider({ query, env }).generatePlan(input, skill);
     const o = (calls[0] as Call).options as Options;
-    expect(o.env).toEqual({ PATH: "/bin", HOME: "/h" });
+    expect(o.env).toEqual({ PATH: "/bin", HOME: "/h", ENABLE_CLAUDEAI_MCP_SERVERS: "false" });
     expect(JSON.stringify(o)).not.toMatch(/sk-secret|apiKey|api_key/i);
     expect(env.ANTHROPIC_API_KEY).toBe("sk-secret");
   });

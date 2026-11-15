@@ -10,6 +10,9 @@ export const DEFAULT_CLAUDE_MODEL = "sonnet";
 
 export const NOT_SIGNED_IN_MESSAGE = "Claude Code is not signed in, run `claude` and log in";
 
+/** One attempt without extended thinking takes well under a minute on a typical diff. */
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = 120_000;
+
 /** Variables that would switch the SDK from the local login to key-based auth. */
 export const STRIPPED_ENV_VARS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const;
 
@@ -22,6 +25,8 @@ export interface ClaudeAgentProviderOptions {
   /** Environment the SDK subprocess inherits; defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** An attempt that has not finished by then is aborted and fails with a `ProviderError`. */
+  timeoutMs?: number;
 }
 
 const defaultQuery: ClaudeQueryFn = (params) => {
@@ -31,6 +36,12 @@ const defaultQuery: ClaudeQueryFn = (params) => {
   }
   return run();
 };
+
+/** Removes one Markdown code fence wrapped around the whole reply; anything else is returned as is. */
+export function unwrapCodeFence(text: string): string {
+  const match = /^\s*```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n```\s*$/.exec(text);
+  return match ? match[1]! : text;
+}
 
 function stripFrontmatter(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, "");
@@ -44,16 +55,25 @@ export function buildSystemPrompt(skill: Skill): string {
   return parts.join("\n\n---\n\n");
 }
 
-export function buildUserMessage(input: PlanningInput, previousProblems?: readonly Problem[]): string {
+export function buildUserMessage(
+  input: PlanningInput,
+  previousProblems?: readonly Problem[],
+  previousPlan?: string,
+): string {
   const lines = ["Plan the review for this input.", "", JSON.stringify(input, null, 2)];
   if (previousProblems && previousProblems.length > 0) {
+    if (previousPlan !== undefined) {
+      lines.push("", "This is the plan you returned last time:", "", previousPlan);
+    }
     lines.push(
       "",
-      "The plan you returned last time was rejected with these problems:",
+      "It was rejected with these problems:",
       "",
       ...formatProblems(previousProblems),
       "",
-      "Fix every line above and return the whole plan again, as one JSON object and nothing else.",
+      previousPlan !== undefined
+        ? "Change only what these lines name, keep everything else as it is, and return the whole plan again, as one JSON object and nothing else."
+        : "Fix every line above and return the whole plan again, as one JSON object and nothing else.",
     );
   }
   return lines.join("\n");
@@ -62,6 +82,8 @@ export function buildUserMessage(input: PlanningInput, previousProblems?: readon
 export function buildEnv(source: NodeJS.ProcessEnv): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...source };
   for (const name of STRIPPED_ENV_VARS) delete env[name];
+  // The account's claude.ai connectors load even with `tools: []`; a call to one ends the single turn.
+  env.ENABLE_CLAUDEAI_MCP_SERVERS = "false";
   return env;
 }
 
@@ -74,12 +96,16 @@ export class ClaudeAgentProvider implements Provider {
   private readonly query: ClaudeQueryFn;
   private readonly env: NodeJS.ProcessEnv;
   private readonly cwd: string | undefined;
+  private readonly timeoutMs: number;
+  /** The last reply, sent back on a retry so the model edits its plan instead of starting over. */
+  private lastReply: string | undefined;
 
   constructor(options: ClaudeAgentProviderOptions = {}) {
     this.model = options.model?.trim() || DEFAULT_CLAUDE_MODEL;
     this.query = options.query ?? defaultQuery;
     this.env = options.env ?? process.env;
     this.cwd = options.cwd;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS;
   }
 
   buildOptions(skill: Skill): Options {
@@ -88,7 +114,12 @@ export class ClaudeAgentProvider implements Provider {
       systemPrompt: buildSystemPrompt(skill),
       tools: [],
       maxTurns: 1,
+      // Adaptive thinking spent ~18k tokens and ~3 minutes per attempt on a 38-hunk diff;
+      // without it the same plan takes ~25 s.
+      thinking: { type: "disabled" },
       settingSources: [],
+      mcpServers: {},
+      strictMcpConfig: true,
       persistSession: false,
       permissionMode: "dontAsk",
       env: buildEnv(this.env),
@@ -98,17 +129,27 @@ export class ClaudeAgentProvider implements Provider {
   }
 
   async generatePlan(input: PlanningInput, skill: Skill, previousProblems?: readonly Problem[]): Promise<string> {
-    const prompt = buildUserMessage(input, previousProblems);
+    const retrying = previousProblems !== undefined && previousProblems.length > 0;
+    if (!retrying) this.lastReply = undefined;
+    const prompt = buildUserMessage(input, previousProblems, retrying ? this.lastReply : undefined);
     let assistantError: string | undefined;
     let result: Extract<SDKMessage, { type: "result" }> | undefined;
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
+    const timedOut = () =>
+      new ProviderError(`Claude did not answer within ${Math.ceil(this.timeoutMs / 1000)} s`, this.id);
     try {
-      for await (const message of this.query({ prompt, options: this.buildOptions(skill) })) {
+      for await (const message of this.query({ prompt, options: { ...this.buildOptions(skill), abortController } })) {
         if (message.type === "assistant" && message.error) assistantError = message.error;
         else if (message.type === "result") result = message;
       }
     } catch (err) {
+      if (abortController.signal.aborted) throw timedOut();
       throw this.wrap(err);
+    } finally {
+      clearTimeout(timer);
     }
+    if (abortController.signal.aborted && !result) throw timedOut();
 
     if (!result) {
       if (assistantError) throw this.fail(assistantError, assistantError);
@@ -119,7 +160,8 @@ export class ClaudeAgentProvider implements Provider {
         result.subtype === "success" ? result.result : result.errors.join("; ") || result.subtype;
       throw this.fail(assistantError ?? detail, detail);
     }
-    return result.result;
+    this.lastReply = unwrapCodeFence(result.result);
+    return this.lastReply;
   }
 
   private fail(signal: string, detail: string): ProviderError {

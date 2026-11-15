@@ -164,6 +164,31 @@ suite("diff-boss extension", () => {
     assert.strictEqual(state.currentStage, 0);
   });
 
+  test("a hard-to-read summary is accepted and carries its reading grade", async () => {
+    const hard: Provider = {
+      id: "hard",
+      async generatePlan(input: PlanningInput): Promise<string> {
+        const plan = JSON.parse(await fakeProvider.generatePlan(input, { body: "", references: {} }));
+        plan.stages[0].hunks[0].summary =
+          "Configuration initialization necessitates considerable architectural deliberation.";
+        return JSON.stringify(plan);
+      },
+    };
+    api.registerProvider(hard);
+    const config = vscode.workspace.getConfiguration("diffBoss");
+    await config.update("provider", "hard", vscode.ConfigurationTarget.Global);
+    try {
+      const dir = await newRepoInWorkspace();
+      await startReview(dir);
+      assert.ok(!seen.some((m) => m.type === "failed"), "a high grade does not fail the plan");
+      const hunks = lastReview().stages.flatMap((s) => s.hunks);
+      assert.ok((hunks[0]!.readabilityGrade ?? 0) > 8, "the first hunk carries its grade");
+      assert.strictEqual(hunks[1]!.readabilityGrade, undefined);
+    } finally {
+      await config.update("provider", "fake", vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test("ready replays the current state", async () => {
     const dir = await newRepoInWorkspace();
     const controller = await startReview(dir);
@@ -338,5 +363,28 @@ suite("diff-boss extension", () => {
     await vscode.commands.executeCommand("diffBoss.review");
     assert.strictEqual(second, first);
     assert.strictEqual(api.panelsCreated(), before);
+  });
+
+  test("an agent session prepares, writes its own plan and opens the review with no provider call", async () => {
+    const dir = await newRepoInWorkspace();
+    const link = (route: string) => vscode.Uri.parse(`vscode://${EXTENSION_ID}/${route}?path=${encodeURIComponent(dir)}`);
+    await api.handleUri(link("prepare"));
+    const index = JSON.parse(readFileSync(join(dir, ".git", "diff-boss", "hunks.json"), "utf8")) as {
+      hunks: { id: string }[];
+      planFile: string;
+      resultFile: string;
+      skill: string;
+    };
+    assert.strictEqual(index.hunks.length, 2);
+    assert.ok(readFileSync(index.skill, "utf8").includes("diff-boss-plan"), "the index points at the planning skill");
+    const plan = JSON.parse(await fakeProvider.generatePlan({ hunks: index.hunks as never, recentCommits: [] }, { body: "", references: {} }));
+    writeFileSync(index.planFile, JSON.stringify(plan));
+    await api.handleUri(link("review-plan"));
+    const controller = api.controller();
+    assert.ok(controller);
+    await controller.idle();
+    assert.strictEqual(lastReview().stages.length, 2);
+    assert.ok(!seen.some((m) => m.type === "generating"), "no provider call");
+    assert.deepStrictEqual(JSON.parse(readFileSync(index.resultFile, "utf8")), { ok: true, stages: 2 });
   });
 });

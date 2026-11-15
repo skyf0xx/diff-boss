@@ -13,6 +13,8 @@ export const ReviewHunkSchema = z.object({
   /** "Needs hunk n" numbers, from `needs` and the final order. */
   needs: z.array(z.number().int().min(1)),
   staged: z.boolean(),
+  /** Set when the summary's reading grade is above the limit; the summary is still shown. */
+  readabilityGrade: z.number().optional(),
 });
 export type ReviewHunk = z.infer<typeof ReviewHunkSchema>;
 

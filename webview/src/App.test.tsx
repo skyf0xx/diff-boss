@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostToWebview, ReviewState, WebviewToHost } from "../../src/contract";
 import { App } from "./App";
 
@@ -86,10 +86,35 @@ describe("startup", () => {
   });
 });
 
+describe("readability", () => {
+  it("marks a hunk whose summary is hard to read and leaves the others plain", () => {
+    const s = state();
+    s.stages[0]!.hunks[0] = { ...s.stages[0]!.hunks[0]!, readabilityGrade: 8.94 };
+    review(s);
+    expect(within(card(1)).getByText("Hard to read · grade 8.9")).toBeTruthy();
+    expect(within(card(2)).queryByText(/Hard to read/)).toBeNull();
+    expect(within(card(1)).getByText("Summary 1.")).toBeTruthy();
+  });
+});
+
 describe("states", () => {
   it("shows generating attempts", () => {
     host({ type: "generating", attempt: 2, maxAttempts: 3 });
     expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3");
+  });
+
+  it("counts the seconds of each attempt and restarts on the next one", () => {
+    vi.useFakeTimers();
+    try {
+      host({ type: "generating", attempt: 1, maxAttempts: 3 });
+      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 0 s");
+      act(() => void vi.advanceTimersByTime(3000));
+      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 3 s");
+      host({ type: "generating", attempt: 2, maxAttempts: 3 });
+      expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3 · 0 s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lists failed problems and reruns", async () => {
@@ -107,11 +132,12 @@ describe("review state", () => {
     expect(screen.getByText("fix(ui): align labels")).toBeTruthy();
     const c1 = card(1);
     expect(within(c1).getByText("Summary 1.")).toBeTruthy();
-    expect(within(c1).getByText("@@ -1,2 +1,2 @@")).toBeTruthy();
+    expect(within(c1).getByText("Line 1")).toBeTruthy();
     expect(within(c1).queryByText(/diff --git/)).toBeNull();
-    expect(within(c1).getByText("+new").className).toContain("diff-added");
-    expect(within(c1).getByText("-old").className).toContain("diff-removed");
-    expect(within(c1).getByText("keep", { exact: false }).className).toContain("diff-context");
+    expect(within(c1).queryByText(/^[+-]/)).toBeNull();
+    expect(within(c1).getByText("new").closest(".diff-line")?.className).toContain("diff-added");
+    expect(within(c1).getByText("old").closest(".diff-line")?.className).toContain("diff-removed");
+    expect(within(c1).getByText("keep", { exact: false }).closest(".diff-line")?.className).toContain("diff-context");
     expect(within(c1).getByRole("button", { name: "Stage hunk" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Discard" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Open file ↗" })).toBeTruthy();

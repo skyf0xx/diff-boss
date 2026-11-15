@@ -31,11 +31,20 @@ code --install-extension diff-boss.vsix
 
 Only unstaged changes are reviewed. Changes that are already staged are not shown.
 
+## Let the agent session plan the review
+
+The session that made the changes already knows why it made them, so it can write the plan itself. diff-boss then validates the plan and opens the review with no model call of its own.
+
+1. Copy `agent-skill/SKILL.md` to `~/.claude/skills/diff-boss/SKILL.md`.
+2. In the Claude Code session that made the changes, say "diff-boss this".
+
+The session opens `vscode://diff-boss.diff-boss/prepare?path=<repo>`, which writes a hunk index to `.git/diff-boss/hunks.json`. It writes its plan to `.git/diff-boss/plan.json` and opens `vscode://diff-boss.diff-boss/review-plan?path=<repo>`. diff-boss writes the outcome to `.git/diff-boss/result.json`, with the validator's problems if the plan was rejected, and the session fixes the plan and tries again. The first time, VS Code asks whether to let diff-boss open the link.
+
 ## The review flow
 
 1. diff-boss collects the unstaged hunks and asks the provider for a plan. If the plan fails validation, the problems go back to the provider and the plan is requested again, up to `diffBoss.maxAttempts` times. If the attempts run out, the view shows the last problems and no plan is accepted.
 2. The view shows the plan as stages. Each stage has a header, `type(scope): description`, with its hunks below in plan order.
-3. Each hunk card shows the file path, a one-sentence summary and the patch. A hunk that depends on earlier hunks shows **Needs hunk n** labels, numbered by position in the plan. **Open file** opens the file at the hunk's first line.
+3. Each hunk card shows the file path, a one-sentence summary and the patch. A hunk that depends on earlier hunks shows **Needs hunk n** labels, numbered by position in the plan. **Open file** opens the file at the hunk's first line. A summary above reading grade 8 shows a **Hard to read** marker; it does not stop the review.
 4. Per hunk:
    - **Stage** adds exactly that hunk to the index. The card then shows Staged with an **Unstage** action.
    - **Unstage** removes exactly that hunk from the index.

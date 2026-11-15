@@ -1,6 +1,6 @@
 ---
 name: pr-writing
-description: Use whenever writing a PR title/description, a commit message body, a code review comment, or an issue — in Hedgehog's own repo or any consuming project. Triggers on "open a PR", "write the PR description", "comment on this PR", "file an issue". Covers writing style (terse, info-dense, Simplified Technical English), the Why/What shape, folding deep reasoning under `<details>`, and the pre-open checklist (CI status, scope, verified claims only).
+description: Use whenever writing a PR title/description, a commit message body, a code review comment, or an issue. Triggers on "open a PR", "write the PR description", "comment on this PR", "file an issue". Covers writing style (terse, info-dense, Simplified Technical English), the Why/What shape, folding deep reasoning under `<details>`, and the pre-open checklist (CI status, scope, verified claims only).
 ---
 
 # PR Writing
@@ -53,8 +53,8 @@ as a record of the work session.
   listing what you actually ran, not what should theoretically pass.
 - **Issue title**: plain English a non-technical reader would say out
   loud, not a commit-style `<type>(<scope>): <summary>`. Name the
-  outcome, not the mechanism — "Improve how Hedgehog tracks and enforces
-  a project's architecture", not "feat(core): add pattern field".
+  outcome, not the mechanism — "Make the review open without a second
+  model call", not "feat(extension): add plan handoff".
 - **Comments**: lead with the concrete finding, then (if needed) the fix
   requested. No preamble.
 

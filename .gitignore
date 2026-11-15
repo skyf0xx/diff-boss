@@ -1,7 +1,3 @@
-.hedgehog/graph-server.json
-.hedgehog/hedgehog.db
-.hedgehog/hedgehog.db-*
-.hedgehog/commit.lock
 node_modules
 dist
 out

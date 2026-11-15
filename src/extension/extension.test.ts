@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -10,6 +10,8 @@ import { LaunchRefusedError, parsePathParam, resolveRepoPath } from "./activate"
 import { CLAUDE_NOT_FOUND_MESSAGE, createClaudeQuery, findClaudeExecutable } from "./claude-runtime";
 import { ReviewController, type ControllerDeps } from "./controller";
 import { firstNewLine } from "./hunk-location";
+import { FilePlanSource, HUNKS_FILE, PLAN_FILE, RESULT_FILE, buildHunkIndex, handoffDir, writeHunkIndex } from "./handoff";
+import { runGitChecked } from "../git";
 import { buildCsp, renderHtml } from "./panel";
 import { SettingsError, readSettings } from "./settings";
 
@@ -382,5 +384,90 @@ describe("ReviewController", () => {
     await controller.handleMessage(42);
     expect(posted.length).toBe(n);
     expect(git.stage).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent handoff", () => {
+  const goodPlan = JSON.stringify({
+    stages: [
+      { type: "feat", scope: "a", description: "change a", hunks: [{ id: "h1", summary: "A line changed.", needs: [] }] },
+      { type: "fix", scope: "b", description: "change b", hunks: [{ id: "h2", summary: "A line changed.", needs: ["h1"] }] },
+    ],
+  });
+
+  it("indexes hunks by id with their @@ line and first change, without patch bodies", () => {
+    const index = buildHunkIndex({ hunks: [hunk("h1", "a.ts", "@@ -3 +3 @@ fn()")], recentCommits: ["feat: x"] }, "/g/diff-boss", "/ext/skill");
+    expect(index).toEqual({
+      skill: "/ext/skill/SKILL.md",
+      planFile: "/g/diff-boss/plan.json",
+      resultFile: "/g/diff-boss/result.json",
+      recentCommits: ["feat: x"],
+      hunks: [{ id: "h1", file: "a.ts", status: "modified", at: "@@ -3 +3 @@ fn()", firstChange: "-x" }],
+    });
+  });
+
+  it("puts the handoff directory inside the git dir and clears an old plan and result", async () => {
+    const repo = tmp();
+    await runGitChecked(["init", "-q"], { cwd: repo });
+    const dir = await handoffDir(repo);
+    expect(dir).toBe(join(repo, ".git", "diff-boss"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, PLAN_FILE), "old");
+    writeFileSync(join(dir, RESULT_FILE), "old");
+    await writeHunkIndex(dir, buildHunkIndex({ hunks: [], recentCommits: [] }, dir, "/s"));
+    expect(existsSync(join(dir, PLAN_FILE))).toBe(false);
+    expect(existsSync(join(dir, RESULT_FILE))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, HUNKS_FILE), "utf8")).hunks).toEqual([]);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("validates the session's plan with no provider call and reports success", async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, PLAN_FILE), goodPlan);
+    const generatePlan = vi.fn();
+    const { controller, posted } = setup({ planSource: new FilePlanSource(dir) }, { id: "x", generatePlan });
+    await controller.start();
+    expect(generatePlan).not.toHaveBeenCalled();
+    expect(posted.map((m) => m.type)).toEqual(["loading", "review"]);
+    expect(JSON.parse(readFileSync(join(dir, RESULT_FILE), "utf8"))).toEqual({ ok: true, stages: 2 });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("writes the validator's ✗ lines for the session to fix, then rereads the plan on rerun", async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, PLAN_FILE), JSON.stringify({ stages: [] }));
+    const { controller, posted } = setup({ planSource: new FilePlanSource(dir) });
+    await controller.start();
+    expect(posted.at(-1)).toMatchObject({ type: "failed" });
+    const failed = JSON.parse(readFileSync(join(dir, RESULT_FILE), "utf8"));
+    expect(failed.ok).toBe(false);
+    expect(failed.problems[0]).toMatch(/^✗ /);
+    writeFileSync(join(dir, PLAN_FILE), goodPlan);
+    await controller.handleMessage({ type: "rerun" });
+    expect(posted.at(-1)).toMatchObject({ type: "review" });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports a missing plan as a problem", async () => {
+    const dir = tmp();
+    const { controller } = setup({ planSource: new FilePlanSource(dir) });
+    await controller.start();
+    const result = JSON.parse(readFileSync(join(dir, RESULT_FILE), "utf8"));
+    expect(result).toMatchObject({ ok: false });
+    expect(result.problems[0]).toMatch(/No plan at/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("switches an open review to the session's plan", async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, PLAN_FILE), goodPlan);
+    const generatePlan = vi.fn(async () => goodPlan);
+    const { controller } = setup({}, { id: "x", generatePlan });
+    await controller.start();
+    controller.usePlanSource(new FilePlanSource(dir));
+    await controller.start();
+    expect(generatePlan).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(dir, RESULT_FILE))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
