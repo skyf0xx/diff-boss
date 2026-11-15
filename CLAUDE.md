@@ -6,36 +6,6 @@ This project is built with **Hedgehog**: a one-step-at-a-time build
 discipline. The rules below aren't project preferences — they're how the
 build stays mechanically correct. Follow them exactly.
 
-<!-- hedgehog:bootstrap-only start -->
-## First message in a fresh install
-
-If `{{PROJECT_SUMMARY}}` above is still an unfilled placeholder, this is a
-brand-new install and nothing has been built yet. Open with something
-short and warm — 🦔 plus one line asking what the user wants to build —
-then follow `planner` in this thread, not as a subagent dispatch —
-Phase 0's BMAD elicitation is a live, multi-turn conversation the user
-needs a direct channel for. Read `planner.md` fresh off disk (this
-install just wrote it, in this session — don't rely on a prior read or
-prior-project memory of what it says) and run it here through Confirm &
-Lock and the `bootstrap` handoff. This same rule holds at every later
-handoff to a newly-installed agent or skill in this session: read its
-file, don't assume its content.
-
-The build continues in this session — nothing here needs a restart. Hosts
-differ in whether they pick up agents written mid-session, so prefer
-reading an agent's file from `.claude/agents/` and following it inline;
-each one is self-contained, and that path works everywhere. Reading also
-avoids the quiet failure of dispatch by name, where `planner` or
-`reviewer` resolves to the user's own unrelated global agent and runs a
-different discipline with no symptom. If a dispatch does error with a
-list of available agents that omits Hedgehog's, that is the same case —
-read the file and carry on.
-
-Don't re-explain the discipline or summarize this file; the greeting is
-one line, not a tour. Skip this entirely once the placeholder is filled
-in — every later session starts with `hedgehog status`, not a greeting.
-<!-- hedgehog:bootstrap-only end -->
-
 ## How to work here
 
 The build is a loop of small, gated, committed steps. You never hold the
@@ -116,11 +86,6 @@ Correction Protocol, never a quiet edit.
   it, `hedgehog verify` gates and commits it. Also holds the Correction
   Protocol and this core's Stop Condition. Invoke it at the start of any
   build session and for "what's next".
-<!-- hedgehog:bootstrap-only start -->
-- **`hedgehog-bootstrap-authored-core`** — run **once**, at project
-  start, to generate and verify this core's workspace from the stack in
-  `core-design.md`. Skip once its `feat(<id>): workspace` commit exists.
-<!-- hedgehog:bootstrap-only end -->
 - **`conventional-commits`** — when a change spans several layers in one
   working-tree pass and needs splitting back into per-layer commits
   (mainly Correction Protocol cleanups).
