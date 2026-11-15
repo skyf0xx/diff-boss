@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostToWebview, ReviewState, WebviewToHost } from "../../src/contract";
 import { App } from "./App";
 
@@ -90,6 +90,20 @@ describe("states", () => {
   it("shows generating attempts", () => {
     host({ type: "generating", attempt: 2, maxAttempts: 3 });
     expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3");
+  });
+
+  it("counts the seconds of each attempt and restarts on the next one", () => {
+    vi.useFakeTimers();
+    try {
+      host({ type: "generating", attempt: 1, maxAttempts: 3 });
+      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 0 s");
+      act(() => void vi.advanceTimersByTime(3000));
+      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 3 s");
+      host({ type: "generating", attempt: 2, maxAttempts: 3 });
+      expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3 · 0 s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lists failed problems and reruns", async () => {
