@@ -364,4 +364,27 @@ suite("diff-boss extension", () => {
     assert.strictEqual(second, first);
     assert.strictEqual(api.panelsCreated(), before);
   });
+
+  test("an agent session prepares, writes its own plan and opens the review with no provider call", async () => {
+    const dir = await newRepoInWorkspace();
+    const link = (route: string) => vscode.Uri.parse(`vscode://${EXTENSION_ID}/${route}?path=${encodeURIComponent(dir)}`);
+    await api.handleUri(link("prepare"));
+    const index = JSON.parse(readFileSync(join(dir, ".git", "diff-boss", "hunks.json"), "utf8")) as {
+      hunks: { id: string }[];
+      planFile: string;
+      resultFile: string;
+      skill: string;
+    };
+    assert.strictEqual(index.hunks.length, 2);
+    assert.ok(readFileSync(index.skill, "utf8").includes("diff-boss-plan"), "the index points at the planning skill");
+    const plan = JSON.parse(await fakeProvider.generatePlan({ hunks: index.hunks as never, recentCommits: [] }, { body: "", references: {} }));
+    writeFileSync(index.planFile, JSON.stringify(plan));
+    await api.handleUri(link("review-plan"));
+    const controller = api.controller();
+    assert.ok(controller);
+    await controller.idle();
+    assert.strictEqual(lastReview().stages.length, 2);
+    assert.ok(!seen.some((m) => m.type === "generating"), "no provider call");
+    assert.deepStrictEqual(JSON.parse(readFileSync(index.resultFile, "utf8")), { ok: true, stages: 2 });
+  });
 });

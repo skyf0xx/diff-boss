@@ -7,11 +7,16 @@ import { GitCliPort, GitScratchIndex } from "../git";
 import { createDefaultRegistry, loadSkill } from "../providers";
 import { createClaudeQuery } from "./claude-runtime";
 import { ReviewController } from "./controller";
+import { FilePlanSource, buildHunkIndex, handoffDir, writeHunkIndex } from "./handoff";
 import { ReviewPanel } from "./panel";
 import { readSettings } from "./settings";
 
 export const REVIEW_COMMAND = "diffBoss.review";
 export const REVIEW_URI_PATH = "/review";
+/** Writes the hunk index an agent session plans from. */
+export const PREPARE_URI_PATH = "/prepare";
+/** Opens the review with the plan the agent session wrote, with no provider call. */
+export const REVIEW_PLAN_URI_PATH = "/review-plan";
 
 export class LaunchRefusedError extends Error {
   override readonly name = "LaunchRefusedError";
@@ -85,6 +90,7 @@ export interface DiffBossApi {
 interface OpenReview {
   panel: ReviewPanel;
   controller: ReviewController;
+  repo: string;
 }
 
 export function activate(context: vscode.ExtensionContext): DiffBossApi {
@@ -101,17 +107,30 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
   const workspaceFolders = () =>
     folderOverride ?? (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
 
-  async function launch(requested?: string): Promise<ReviewController | undefined> {
+  const skillDir = () => path.join(context.extensionPath, "skill");
+  const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  async function launch(requested?: string, fromAgent = false): Promise<ReviewController | undefined> {
+    let repo: string;
+    let planSource: FilePlanSource | undefined;
+    try {
+      repo = open && !requested ? open.repo : resolveRepoPath(requested, workspaceFolders());
+      if (fromAgent) planSource = new FilePlanSource(await handoffDir(repo));
+    } catch (err) {
+      showError(`diff-boss: ${errorText(err)}`);
+      return undefined;
+    }
+    if (open && fromAgent && open.repo !== repo) {
+      open.panel.dispose();
+      open = undefined;
+    }
     if (open) {
+      if (fromAgent) {
+        open.controller.usePlanSource(planSource);
+        void open.controller.start();
+      }
       open.panel.reveal();
       return open.controller;
-    }
-    let repo: string;
-    try {
-      repo = resolveRepoPath(requested, workspaceFolders());
-    } catch (err) {
-      showError(`diff-boss: ${err instanceof Error ? err.message : String(err)}`);
-      return undefined;
     }
 
     const git = new GitCliPort(repo);
@@ -134,7 +153,8 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
         }
         return provider;
       },
-      loadSkill: () => loadSkill(path.join(context.extensionPath, "skill")),
+      loadSkill: () => loadSkill(skillDir()),
+      planSource,
       host: {
         post: (message) => {
           panel?.post(message);
@@ -158,7 +178,7 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
       },
     });
     panel = reviewPanel;
-    open = { panel: reviewPanel, controller };
+    open = { panel: reviewPanel, controller, repo };
     try {
       await reviewPanel.load();
     } catch (err) {
@@ -170,9 +190,31 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
     return controller;
   }
 
+  async function prepare(requested?: string): Promise<void> {
+    let dir: string | undefined;
+    try {
+      const repo = resolveRepoPath(requested, workspaceFolders());
+      dir = await handoffDir(repo);
+      const input = await new GitCliPort(repo).collect();
+      await writeHunkIndex(dir, buildHunkIndex(input, dir, skillDir()));
+      vscode.window.setStatusBarMessage(`diff-boss: ${input.hunks.length} hunks ready for planning`, 5000);
+    } catch (err) {
+      const message = errorText(err);
+      if (dir) await new FilePlanSource(dir).report({ ok: false, problems: [{ field: "prepare", message }] }).catch(() => {});
+      showError(`diff-boss: ${message}`);
+    }
+  }
+
+  const routes: Record<string, (requested: string | undefined) => Promise<unknown>> = {
+    [REVIEW_URI_PATH]: (requested) => launch(requested),
+    [PREPARE_URI_PATH]: (requested) => prepare(requested),
+    [REVIEW_PLAN_URI_PATH]: (requested) => launch(requested, true),
+  };
+
   async function handleUri(uri: vscode.Uri): Promise<void> {
-    if (uri.path !== REVIEW_URI_PATH) {
-      showError(`diff-boss: unknown link ${uri.path}; expected ${REVIEW_URI_PATH}`);
+    const route = routes[uri.path];
+    if (!route) {
+      showError(`diff-boss: unknown link ${uri.path}; expected one of ${Object.keys(routes).join(", ")}`);
       return;
     }
     let requested: string | undefined;
@@ -182,7 +224,7 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
       showError("diff-boss: the link has a malformed path");
       return;
     }
-    await launch(requested);
+    await route(requested);
   }
 
   context.subscriptions.push(
