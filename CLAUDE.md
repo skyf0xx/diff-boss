@@ -1,26 +1,6 @@
-<!-- hedgehog:bootstrap-only start -->
-<!--
-  Hedgehog project CLAUDE.md template.
+# diff-boss
 
-  This file is copied into a consuming project's repo root at install
-  time, with the core-section marker below filled in from this
-  project's chosen core's own CLAUDE.core.<name>.md (src/templates/).
-  Placeholders wrapped in {{ }} are filled in once, at planning intake,
-  by the `planner` agent (or by hand). Everything outside the
-  placeholders is a constant of the Hedgehog discipline and should be
-  left as-is.
-
-  Delete this comment block after the placeholders are filled in.
--->
-<!-- hedgehog:bootstrap-only end -->
-
-# {{PROJECT_NAME}}
-
-{{PROJECT_SUMMARY — 2–4 sentences the `planner` writes at planning
-intake: what this project is, who it's for, and what it does. State
-current intent, not history. Keep it tight — the full product narrative
-lives in this core's own planning-intake output and the build graph, not
-here.}}
+diff-boss is a VS Code extension for developers who review unstaged changes, often ones an AI agent wrote. It sends the working tree's hunks to a model provider (the Claude Agent SDK first), validates the returned plan of conventional-commit stages, and shows a stage-by-stage review view where each hunk can be staged, discarded and committed. A developer or an agent starts it from the command palette or the extension's `vscode://` URI.
 
 This project is built with **Hedgehog**: a one-step-at-a-time build
 discipline. The rules below aren't project preferences — they're how the

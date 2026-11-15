@@ -1,0 +1,45 @@
+id: diff-boss
+pattern: hexagonal
+layers:
+  - id: contract
+    scope: ["src/contract/**"]
+    verify: "pnpm vitest run src/contract && pnpm vitest run src/ webview/ && pnpm typecheck"
+    verify_radius: ["src/**", "webview/**"]
+    commit: "feat(contract): plan and provider types"
+  - id: git
+    depends_on: contract
+    scope: ["src/git/**"]
+    verify: "pnpm vitest run src/git && pnpm vitest run src/ webview/ && pnpm typecheck"
+    verify_radius: ["src/**", "webview/**"]
+    requires: ["git"]
+    commit: "feat(git): hunk collection and staging"
+  - id: plan
+    depends_on: git
+    scope: ["src/plan/**"]
+    verify: "pnpm vitest run src/plan && pnpm vitest run src/ webview/ && pnpm typecheck"
+    verify_radius: ["src/**", "webview/**"]
+    commit: "feat(plan): validator and retry loop"
+  - id: provider
+    depends_on: plan
+    scope: ["src/providers/**", "skill/**"]
+    verify: "pnpm vitest run src/providers && pnpm vitest run src/ webview/ && pnpm typecheck"
+    verify_radius: ["src/**", "webview/**", "skill/**"]
+    commit: "feat(provider): claude agent sdk adapter"
+  - id: webview
+    depends_on: provider
+    scope: ["webview/**"]
+    verify: "pnpm vitest run webview && pnpm build:webview"
+    commit: "feat(webview): review view"
+  - id: extension
+    depends_on: webview
+    scope: ["src/extension/**", "package.json"]
+    verify: "pnpm build && pnpm test:integration"
+    verify_radius: ["src/**", "webview/**", "skill/**", "package.json"]
+    requires: ["git"]
+    commit: "feat(extension): launch command and review wiring"
+  - id: package
+    depends_on: extension
+    scope: ["README.md", "CHANGELOG.md", "LICENSE", ".vscodeignore", "scripts/check-vsix.mjs"]
+    verify: "pnpm typecheck && pnpm vitest run src/ webview/ && pnpm package && node scripts/check-vsix.mjs"
+    verify_radius: ["src/**", "webview/**", "skill/**", "package.json", "README.md", "CHANGELOG.md", "LICENSE", ".vscodeignore", "scripts/check-vsix.mjs"]
+    commit: "build(package): vsix packaging"
