@@ -1,0 +1,46 @@
+{
+  "id": "soft-readability",
+  "goal": "A summary's reading grade stops rejecting plans and is reported as a warning instead.",
+  "outcome": "A plan whose only problem is a high reading grade is accepted, the review opens, and those hunks are marked as hard to read.",
+  "priority": 2,
+  "requirements": [
+    {
+      "id": "SOFT-READABILITY-RULE-1",
+      "kind": "rule",
+      "statement": "Structural checks (coverage, stage fields, header length, needs, order) keep rejecting exactly as now."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-1",
+      "kind": "acceptance",
+      "statement": "A summary with a Flesch-Kincaid grade above 8 produces no ✗ problem, and the plan is accepted when nothing else is wrong."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-2",
+      "kind": "acceptance",
+      "statement": "The validator returns those summaries as warnings, each with its hunk id and grade."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-3",
+      "kind": "acceptance",
+      "statement": "The review state carries each flagged hunk's reading grade."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-4",
+      "kind": "acceptance",
+      "statement": "The review view shows a 'Hard to read · grade n' marker on that hunk's card."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-5",
+      "kind": "acceptance",
+      "statement": "A summary over 20 words, or that is not one sentence ending with a period, still rejects the plan."
+    },
+    {
+      "id": "SOFT-READABILITY-ACCEPTANCE-6",
+      "kind": "acceptance",
+      "statement": "PLAN.md describes the grade as aim for 7, flagged above 8, not a rejection, and lists the reading-grade line as a warning rather than a fix-or-fail message."
+    }
+  ],
+  "depends_on": [
+    "diff-boss"
+  ]
+}
