@@ -1,0 +1,10 @@
+{
+  "task": "DIFF-BOSS-GIT",
+  "notes": [
+    {
+      "kind": "debt",
+      "note": "Hunk ids are stable only across reads of an unchanged tree: staging one hunk changes the index header and offsets of the file's other hunks, so a fresh collect() re-keys them. The extension must keep the Hunk objects from the planning read and act on their stored patches (git apply tolerates line offsets), using checkApplies for drift; it must not recollect and match by id after each action. collect() leaves PlanningInput.context unset; quoted paths with tabs/newlines are unsupported.",
+      "logged_at": "2026-11-15T06:07:08.142Z"
+    }
+  ]
+}
