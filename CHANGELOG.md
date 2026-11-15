@@ -4,7 +4,8 @@
 
 - Collects unstaged Git hunks (modified, added, deleted, renamed and untracked files) with ids that stay the same while the working tree is unchanged.
 - Asks a provider for a plan of conventional-commit stages in reading order, with one plain sentence per hunk.
-- Validates every plan (hunk coverage, stage headers, summary length and reading grade, `needs` order, and a scratch-index apply check) and sends the problems back to the provider, up to `diffBoss.maxAttempts` times.
+- Validates every plan (hunk coverage, stage headers, summary length, `needs` order, and a scratch-index apply check) and sends the problems back to the provider, up to `diffBoss.maxAttempts` times.
+- A summary above reading grade 8 no longer rejects the plan; its card shows a "Hard to read" marker instead.
 - Claude Agent SDK provider that uses the local Claude Code login. No API key.
 - Provider registry, so a second provider can be added without touching the validator, Git or the review view.
 - Review view with stages, hunk cards, "Needs hunk n" labels, Stage, Unstage, Discard (with a dependents warning), Open file, an editable commit message, Commit and Skip.

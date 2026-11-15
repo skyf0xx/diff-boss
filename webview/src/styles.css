@@ -66,3 +66,4 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .problems { padding-left: 1.25rem; }
 .problems code { font-family: var(--vscode-editor-font-family); }
+.readability { color: var(--vscode-editorWarning-foreground); font-size: 0.85em; margin: -0.25rem 0 0.5rem; }

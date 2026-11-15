@@ -61,7 +61,7 @@ Done when every stage has a commit header that fits 72 characters and every hunk
 - Every input hunk id appears once, and no other id appears.
 - Every `needs` id is earlier in the order.
 - Every stage type is in the list in `references/STAGES.md`.
-- Every summary is one sentence about an outcome, in plain words, of 20 words or fewer. Aim for reading grade 7; the limit is 8.
+- Every summary is one sentence about an outcome, in plain words, of 20 words or fewer. Aim for reading grade 7; above 8 is flagged as hard to read.
 - Nothing in a summary or a message goes beyond what the patch shows.
 
 ## When the purpose is unclear

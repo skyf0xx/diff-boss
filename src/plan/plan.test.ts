@@ -205,9 +205,22 @@ describe("validatePlan", () => {
     p.stages[1]!.hunks[1]!.summary = "It is done. It is done again.";
     const out = lines(await run(p));
     expect(out).toContain("✗ hunks[h1].summary: 21 words, the limit is 20, cut it to one shorter sentence");
-    expect(out.some((l) => /^✗ hunks\[h2\]\.summary: reading grade \d+\.\d, the limit is 8/.test(l))).toBe(true);
+    expect(out.some((l) => l.includes("hunks[h2].summary"))).toBe(false);
     expect(out.some((l) => l.startsWith("✗ hunks[h3].summary: it must be one sentence"))).toBe(true);
     expect(out.some((l) => l.startsWith("✗ hunks[h4].summary: it must be one sentence"))).toBe(true);
+  });
+
+  it("reports a high reading grade as a warning and still accepts the plan", async () => {
+    const p = workedExample();
+    p.stages[0]!.hunks[1]!.summary =
+      "Refactoring necessitates considerable architectural deliberation regarding polymorphic dispatchers.";
+    const r = await run(p);
+    expect(r.problems).toEqual([]);
+    expect(r.plan).toBeDefined();
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]!.hunkId).toBe("h2");
+    expect(r.warnings[0]!.grade).toBeGreaterThan(8);
+    expect((await run(workedExample())).warnings).toEqual([]);
   });
 
   it("reports a needs id that comes later, is unknown or is itself", async () => {
@@ -268,7 +281,7 @@ describe("runPlanner", () => {
   it("accepts on the first attempt without previousProblems", async () => {
     const { provider, generatePlan } = providerOf([good]);
     const r = await runPlanner({ provider, skill, input, scratchIndex: fakeIndex(), maxAttempts: 3 });
-    expect(r).toMatchObject({ ok: true, attempts: 1 });
+    expect(r).toMatchObject({ ok: true, attempts: 1, warnings: [] });
     expect(generatePlan.mock.calls[0]![2]).toBeUndefined();
   });
 
@@ -328,6 +341,13 @@ describe("review state", () => {
     expect(all.find((h) => h.id === "h7")!.needs).toEqual([4]);
     expect(all[0]).toMatchObject({ file: "src/h1.ts", status: "modified", patch: "patch-h1", staged: false });
     expect(state.stages[1]).toMatchObject({ commitMessage: "feat(balance): return balances per token", committed: false });
+  });
+
+  it("carries a warned hunk's reading grade and leaves the others without one", () => {
+    const state = buildReviewState(plan, input.hunks, [{ hunkId: "h3", grade: 8.9 }]);
+    const all = state.stages.flatMap((s) => s.hunks);
+    expect(all.find((h) => h.id === "h3")!.readabilityGrade).toBe(8.9);
+    expect(all.filter((h) => h.readabilityGrade !== undefined).map((h) => h.id)).toEqual(["h3"]);
   });
 
   it("numbers by plan position, not input order", () => {

@@ -4,6 +4,8 @@ import {
   HunkSchema,
   PlanSchema,
   PlanningInputSchema,
+  ReadabilityWarningSchema,
+  ReviewStateSchema,
   STAGE_TYPES,
   WebviewToHostSchema,
   describeDependents,
@@ -160,5 +162,17 @@ describe("messages", () => {
     expect(describeDependents([4])).toBe("Hunk 4 needs this hunk.");
     expect(describeDependents([4, 6])).toBe("Hunks 4 and 6 need this hunk.");
     expect(describeDependents([2, 4, 6])).toBe("Hunks 2, 4 and 6 need this hunk.");
+  });
+});
+
+describe("readability warnings", () => {
+  it("parses a warning and an optional grade on a review hunk", () => {
+    expect(ReadabilityWarningSchema.parse({ hunkId: "a1", grade: 8.9 })).toEqual({ hunkId: "a1", grade: 8.9 });
+    expect(ReadabilityWarningSchema.safeParse({ hunkId: "a1" }).success).toBe(false);
+    const hunk = { id: "a1", number: 1, file: "a.ts", status: "modified", patch: "p", summary: "S.", needs: [], staged: false };
+    const state = (h: object) => ({ currentStage: 0, stages: [{ header: "h", commitMessage: "h", committed: false, hunks: [h] }] });
+    expect(ReviewStateSchema.safeParse(state(hunk)).success).toBe(true);
+    expect(ReviewStateSchema.parse(state({ ...hunk, readabilityGrade: 8.9 })).stages[0]!.hunks[0]!.readabilityGrade).toBe(8.9);
+    expect(ReviewStateSchema.safeParse(state({ ...hunk, readabilityGrade: "high" })).success).toBe(false);
   });
 });

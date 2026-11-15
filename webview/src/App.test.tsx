@@ -86,6 +86,17 @@ describe("startup", () => {
   });
 });
 
+describe("readability", () => {
+  it("marks a hunk whose summary is hard to read and leaves the others plain", () => {
+    const s = state();
+    s.stages[0]!.hunks[0] = { ...s.stages[0]!.hunks[0]!, readabilityGrade: 8.94 };
+    review(s);
+    expect(within(card(1)).getByText("Hard to read · grade 8.9")).toBeTruthy();
+    expect(within(card(2)).queryByText(/Hard to read/)).toBeNull();
+    expect(within(card(1)).getByText("Summary 1.")).toBeTruthy();
+  });
+});
+
 describe("states", () => {
   it("shows generating attempts", () => {
     host({ type: "generating", attempt: 2, maxAttempts: 3 });

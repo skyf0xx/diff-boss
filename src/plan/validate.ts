@@ -1,7 +1,7 @@
 import { HEADER_LIMIT, PlanSchema, STAGE_TYPES, formatHeader } from "../contract/plan";
 import type { Plan } from "../contract/plan";
 import type { Hunk, PlanningInput } from "../contract/hunk";
-import type { Problem } from "../contract/problem";
+import type { Problem, ReadabilityWarning } from "../contract/problem";
 import type { ScratchIndex } from "../contract/ports";
 import { countWords, fleschKincaidGrade } from "./readability";
 
@@ -13,6 +13,8 @@ export const MAX_GRADE = 8;
 export interface ValidationResult {
   plan?: Plan;
   problems: Problem[];
+  /** Summaries above the reading-grade limit. They never reject a plan. */
+  warnings: ReadabilityWarning[];
 }
 
 const SCOPE_RE = /^[a-z0-9-]+$/;
@@ -28,21 +30,23 @@ export async function validatePlan(
   scratchIndex: ScratchIndex,
 ): Promise<ValidationResult> {
   const parsed = parseJson(rawText);
-  if ("problem" in parsed) return { problems: [parsed.problem] };
+  if ("problem" in parsed) return { problems: [parsed.problem], warnings: [] };
   const plan = parsed.plan;
 
+  const summaries = checkSummaries(plan);
+  const warnings = summaries.warnings;
   const problems: Problem[] = [
     ...checkHunkCoverage(plan, input),
     ...checkStageCount(plan),
     ...checkStages(plan),
-    ...checkSummaries(plan),
+    ...summaries.problems,
     ...checkNeeds(plan),
   ];
-  if (problems.length > 0) return { problems };
+  if (problems.length > 0) return { problems, warnings };
 
   const orderProblems = await checkOrder(plan, input, scratchIndex);
-  if (orderProblems.length > 0) return { problems: orderProblems };
-  return { plan, problems: [] };
+  if (orderProblems.length > 0) return { problems: orderProblems, warnings };
+  return { plan, problems: [], warnings };
 }
 
 function parseJson(rawText: string): { plan: Plan } | { problem: Problem } {
@@ -135,8 +139,9 @@ function checkStages(plan: Plan): Problem[] {
   return problems;
 }
 
-function checkSummaries(plan: Plan): Problem[] {
+function checkSummaries(plan: Plan): { problems: Problem[]; warnings: ReadabilityWarning[] } {
   const problems: Problem[] = [];
+  const warnings: ReadabilityWarning[] = [];
   for (const stage of plan.stages) {
     for (const h of stage.hunks) {
       const field = `hunks[${h.id}].summary`;
@@ -152,15 +157,10 @@ function checkSummaries(plan: Plan): Problem[] {
       const grade = fleschKincaidGrade(text);
       if (grade === undefined) continue;
       const shown = Math.round(grade * 10) / 10;
-      if (shown > MAX_GRADE) {
-        problems.push({
-          field,
-          message: `reading grade ${shown.toFixed(1)}, the limit is ${MAX_GRADE}, use shorter words and shorter sentences`,
-        });
-      }
+      if (shown > MAX_GRADE) warnings.push({ hunkId: h.id, grade: shown });
     }
   }
-  return problems;
+  return { problems, warnings };
 }
 
 function isOneSentence(text: string): boolean {

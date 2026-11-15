@@ -2,6 +2,7 @@ import { formatHeader } from "../contract/plan";
 import type { Plan } from "../contract/plan";
 import type { Hunk } from "../contract/hunk";
 import type { ReviewHunk, ReviewState } from "../contract/messages";
+import type { ReadabilityWarning } from "../contract/problem";
 
 export class ReviewStateError extends Error {
   override readonly name = "ReviewStateError";
@@ -11,8 +12,13 @@ export class ReviewStateError extends Error {
  * Builds the initial review state from an accepted plan. Hunk numbers are
  * final positions counted from 1 across all stages; `needs` ids become numbers.
  */
-export function buildReviewState(plan: Plan, hunks: readonly Hunk[]): ReviewState {
+export function buildReviewState(
+  plan: Plan,
+  hunks: readonly Hunk[],
+  warnings: readonly ReadabilityWarning[] = [],
+): ReviewState {
   const byId = new Map(hunks.map((h) => [h.id, h]));
+  const grades = new Map(warnings.map((w) => [w.hunkId, w.grade]));
   const numbers = new Map<string, number>();
   let n = 0;
   for (const stage of plan.stages) {
@@ -41,6 +47,7 @@ export function buildReviewState(plan: Plan, hunks: readonly Hunk[]): ReviewStat
         summary: ph.summary,
         needs,
         staged: false,
+        ...(grades.has(ph.id) ? { readabilityGrade: grades.get(ph.id) } : {}),
       };
     });
     return { header, hunks: reviewHunks, commitMessage: header, committed: false };

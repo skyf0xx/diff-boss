@@ -164,6 +164,31 @@ suite("diff-boss extension", () => {
     assert.strictEqual(state.currentStage, 0);
   });
 
+  test("a hard-to-read summary is accepted and carries its reading grade", async () => {
+    const hard: Provider = {
+      id: "hard",
+      async generatePlan(input: PlanningInput): Promise<string> {
+        const plan = JSON.parse(await fakeProvider.generatePlan(input, { body: "", references: {} }));
+        plan.stages[0].hunks[0].summary =
+          "Configuration initialization necessitates considerable architectural deliberation.";
+        return JSON.stringify(plan);
+      },
+    };
+    api.registerProvider(hard);
+    const config = vscode.workspace.getConfiguration("diffBoss");
+    await config.update("provider", "hard", vscode.ConfigurationTarget.Global);
+    try {
+      const dir = await newRepoInWorkspace();
+      await startReview(dir);
+      assert.ok(!seen.some((m) => m.type === "failed"), "a high grade does not fail the plan");
+      const hunks = lastReview().stages.flatMap((s) => s.hunks);
+      assert.ok((hunks[0]!.readabilityGrade ?? 0) > 8, "the first hunk carries its grade");
+      assert.strictEqual(hunks[1]!.readabilityGrade, undefined);
+    } finally {
+      await config.update("provider", "fake", vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test("ready replays the current state", async () => {
     const dir = await newRepoInWorkspace();
     const controller = await startReview(dir);

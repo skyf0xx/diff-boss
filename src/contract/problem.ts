@@ -13,3 +13,10 @@ export function formatProblem(problem: Problem): string {
 export function formatProblems(problems: readonly Problem[]): string[] {
   return problems.map(formatProblem);
 }
+
+/** A summary whose reading grade is above the limit: reported, never a rejection. */
+export const ReadabilityWarningSchema = z.object({
+  hunkId: z.string(),
+  grade: z.number(),
+});
+export type ReadabilityWarning = z.infer<typeof ReadabilityWarningSchema>;
