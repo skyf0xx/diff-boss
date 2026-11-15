@@ -1,0 +1,15 @@
+{
+  "task": "DIFF-BOSS-PROVIDER",
+  "notes": [
+    {
+      "kind": "decision",
+      "note": "Extension wiring for the provider: map diffBoss.provider (default 'claude') to the registry from createDefaultRegistry(); pass diffBoss.model (default 'sonnet') to ClaudeAgentProvider; load the skill with loadSkill(path.join(context.extensionPath, 'skill')) — the .vsix ships skill/ at its root. Replace the placeholder smoke script: set package.json \"smoke:live\" to 'esbuild src/providers/smoke-live.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/smoke-live.mjs && node dist/smoke-live.mjs' and delete scripts/smoke-live.mjs if allowed by scope (otherwise report it).",
+      "logged_at": "2026-11-15T06:12:49.654Z"
+    },
+    {
+      "kind": "debt",
+      "note": "ClaudeAgentProvider strips ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN from the SDK env, but Bedrock/Vertex switches and CLAUDE_CODE_OAUTH_TOKEN still pass through. The real SDK call has not been exercised against a live login yet; pnpm smoke:live is the first live check.",
+      "logged_at": "2026-11-15T06:12:50.038Z"
+    }
+  ]
+}
