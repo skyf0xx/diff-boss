@@ -38,7 +38,7 @@ Hunk ids are the ids from the input, copied exactly. The ids above are examples.
 | `stages[].description` | Lowercase, imperative, no final period. With the type and scope, the header `type(scope): description` is at most 72 characters. |
 | `stages[].hunks` | At least one hunk, in reading order. |
 | `hunks[].id` | An id from the input, used once in the whole plan. |
-| `hunks[].summary` | One sentence of 20 words or fewer, ending with a period. Reading grade: aim for 7, the limit is 8. See WRITING.md. |
+| `hunks[].summary` | One sentence of 20 words or fewer, ending with a period. Reading grade: aim for 7. Above 8 is flagged in the review, not rejected. See WRITING.md. |
 | `hunks[].needs` | Ids of hunks that must be applied first. Each one comes earlier in the plan. Empty when none. |
 
 Every key in the example is required except `scope`. Add no other keys.
@@ -65,7 +65,6 @@ The app checks the plan in this order and reports each problem as one line, `✗
 | `✗ stages[i].hunks: the stage has no hunks …` | Give the stage at least one hunk, or remove the stage. |
 | `✗ hunks[<id>].summary: <n> words, the limit is 20 …` | Cut it to one shorter sentence. |
 | `✗ hunks[<id>].summary: it must be one sentence ending with a period …` | Write one sentence and end it with a period. Do not use `.`, `!` or `?` in the middle of it. |
-| `✗ hunks[<id>].summary: reading grade <n>, the limit is 8 …` | Use shorter words and shorter sentences. |
 | `✗ hunks[<id>].needs: <other> isn't a hunk in the plan …` | Remove the id, or add that hunk to the plan. |
 | `✗ hunks[<id>].needs: <other> is the hunk itself …` | Remove the hunk's own id from its `needs`. |
 | `✗ hunks[<id>].needs: <other> comes later …` | Move the hunk after the one it needs, or remove the dependency. |
@@ -75,4 +74,4 @@ The order check applies the hunks to a scratch copy of the index in plan order. 
 
 ## Reading grade
 
-The app measures the Flesch–Kincaid grade of each summary. Aim for grade 7. The limit is 8.
+The app measures the Flesch–Kincaid grade of each summary. Aim for grade 7. A summary above grade 8 does not reject the plan: the review shows it with a "Hard to read" marker. Still use short, common words, so the marker is rare.

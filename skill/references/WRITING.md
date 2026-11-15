@@ -9,7 +9,7 @@ Say what is different for the program or its users once this hunk is applied. De
 ## Rules
 
 - One sentence, 20 words or fewer, ending with a period.
-- Reading grade: aim for 7, the limit is 8. Use short, common words and short clauses.
+- Reading grade: aim for 7. Above 8 is flagged as hard to read in the review. Use short, common words and short clauses.
 - Present tense. `now` is a good signal that the sentence describes an outcome.
 - Name things as a user of the code would: token ID, balance, list. Skip identifiers such as `isValidTokenId` unless the sentence is unclear without one.
 - Say only what the patch shows. Give a reason only when the code or a comment states it.

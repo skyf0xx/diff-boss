@@ -87,13 +87,14 @@ describe("loadSkill", () => {
 });
 
 describe("skill content", () => {
-  it("uses the corrected grade wording everywhere", async () => {
+  it("describes the reading grade as a flag, not a limit, everywhere", async () => {
     const s = await loadSkill(SKILL_DIR);
     const all = [s.body, ...Object.values(s.references)].join("\n");
     expect(all).not.toMatch(/7 or lower/i);
-    expect(s.references["PLAN.md"]).toMatch(/aim for 7, the limit is 8/);
-    expect(s.references["WRITING.md"]).toMatch(/aim for 7, the limit is 8/);
-    expect(s.body).toMatch(/limit is 8/);
+    expect(all).not.toMatch(/the limit is 8/);
+    expect(s.references["PLAN.md"]).toMatch(/Reading grade: aim for 7\. Above 8 is flagged in the review, not rejected/);
+    expect(s.references["WRITING.md"]).toMatch(/aim for 7\. Above 8 is flagged as hard to read/);
+    expect(s.body).toMatch(/Aim for reading grade 7; above 8 is flagged as hard to read/);
   });
 
   it("references files that exist and has frontmatter", async () => {
@@ -123,13 +124,14 @@ describe("skill content", () => {
       "✗ stages[i].hunks: the stage has no hunks",
       "✗ hunks[<id>].summary: <n> words, the limit is 20",
       "✗ hunks[<id>].summary: it must be one sentence",
-      "✗ hunks[<id>].summary: reading grade <n>, the limit is 8",
       "✗ hunks[<id>].needs: <other> isn't a hunk in the plan",
       "✗ hunks[<id>].needs: <other> is the hunk itself",
       "✗ hunks[<id>].needs: <other> comes later",
       "✗ order: <id> doesn't apply after the hunks before it",
     ];
     for (const m of messages) expect(plan, m).toContain(m);
+    expect(plan).not.toMatch(/✗ hunks\[<id>\]\.summary: reading grade/);
+    expect(plan).toMatch(/Above 8 is flagged in the review, not rejected/);
   });
 
   it("keeps every example summary inside the validator limits", async () => {
