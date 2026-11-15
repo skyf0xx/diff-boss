@@ -1,5 +1,3 @@
-<!-- Planning intake archive. Process adapted from BMAD-METHOD (bmad-code-org/BMAD-METHOD, MIT). -->
-
 # diff-boss: experience
 
 Source: `Review view (stages).pdf`.

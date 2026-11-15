@@ -1,5 +1,3 @@
-<!-- Planning intake archive. Process adapted from BMAD-METHOD (bmad-code-org/BMAD-METHOD, MIT). -->
-
 # diff-boss: PRD (compressed)
 
 diff-boss is a VS Code extension. It turns the unstaged changes in a Git working tree into a review plan: conventional-commit stages in reading order, with one plain sentence for each hunk. The developer then stages and commits the plan from inside the editor.

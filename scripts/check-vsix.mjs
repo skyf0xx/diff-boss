@@ -62,7 +62,7 @@ if (!zip.names.some((n) => /^extension\/dist\/webview\/assets\/[^/]+\.js$/.test(
   fail('missing extension/dist/webview/assets/*.js');
 }
 
-for (const dir of ['src/', 'test/', '.hedgehog/', 'node_modules/', 'vendor-skills/']) {
+for (const dir of ['src/', 'test/', 'docs/', 'webview/', 'node_modules/', '.claude/']) {
   const hit = zip.names.find((n) => n.startsWith(`extension/${dir}`));
   if (hit) fail(`forbidden path included: ${hit}`);
 }
