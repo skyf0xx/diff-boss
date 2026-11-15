@@ -132,11 +132,12 @@ describe("review state", () => {
     expect(screen.getByText("fix(ui): align labels")).toBeTruthy();
     const c1 = card(1);
     expect(within(c1).getByText("Summary 1.")).toBeTruthy();
-    expect(within(c1).getByText("@@ -1,2 +1,2 @@")).toBeTruthy();
+    expect(within(c1).getByText("Line 1")).toBeTruthy();
     expect(within(c1).queryByText(/diff --git/)).toBeNull();
-    expect(within(c1).getByText("+new").className).toContain("diff-added");
-    expect(within(c1).getByText("-old").className).toContain("diff-removed");
-    expect(within(c1).getByText("keep", { exact: false }).className).toContain("diff-context");
+    expect(within(c1).queryByText(/^[+-]/)).toBeNull();
+    expect(within(c1).getByText("new").closest(".diff-line")?.className).toContain("diff-added");
+    expect(within(c1).getByText("old").closest(".diff-line")?.className).toContain("diff-removed");
+    expect(within(c1).getByText("keep", { exact: false }).closest(".diff-line")?.className).toContain("diff-context");
     expect(within(c1).getByRole("button", { name: "Stage hunk" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Discard" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Open file ↗" })).toBeTruthy();

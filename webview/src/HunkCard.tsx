@@ -43,7 +43,7 @@ export function HunkCard({ hunk, disabled, pendingDiscard, ...on }: Props) {
           ))}
         </ul>
       )}
-      <DiffView patch={hunk.patch} />
+      <DiffView patch={hunk.patch} file={hunk.file} />
       <div className="actions">
         {hunk.staged ? (
           <>

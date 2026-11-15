@@ -34,10 +34,38 @@ h1 { font-size: 1.4em; font-weight: 600; }
   font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
   background: var(--vscode-textCodeBlock-background, transparent);
 }
-.diff-line { display: block; padding: 0 0.5rem; white-space: pre; }
-.diff-hunk-header { color: var(--vscode-descriptionForeground); }
-.diff-added { background: var(--vscode-diffEditor-insertedTextBackground); }
-.diff-removed { background: var(--vscode-diffEditor-removedTextBackground); }
+.diff-line { display: grid; grid-template-columns: auto auto 3px 1fr; line-height: 1.5; }
+.diff-no {
+  min-width: 3ch; padding: 0 0.5ch; text-align: right; user-select: none;
+  color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
+}
+.diff-bar { background: transparent; }
+.diff-code { padding: 0 0.75rem 0 0.6rem; white-space: pre; }
+.diff-added .diff-bar { background: var(--vscode-editorGutter-addedBackground, #2ea043); }
+.diff-removed .diff-bar { background: var(--vscode-editorGutter-deletedBackground, #f85149); }
+.diff-removed .diff-code { opacity: 0.75; }
+.diff-code span[style] {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style, inherit);
+  font-weight: var(--shiki-light-font-weight, inherit);
+}
+.vscode-dark .diff-code span[style],
+.vscode-high-contrast:not(.vscode-high-contrast-light) .diff-code span[style] {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style, inherit);
+  font-weight: var(--shiki-dark-font-weight, inherit);
+}
+.diff-word { color: inherit; border-radius: 2px; }
+.diff-added .diff-word { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.3)); }
+.diff-removed .diff-word { background: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.3)); }
+.diff-hunk-header {
+  display: flex; gap: 0.75rem; padding: 0.15rem 0.75rem; margin: 0.25rem 0;
+  font-size: 0.85em; color: var(--vscode-descriptionForeground);
+  border-block: 1px solid var(--vscode-panel-border, transparent);
+}
+.diff-hunk-header:first-child { margin-top: 0; border-top: 0; }
+.diff-hunk-context { opacity: 0.8; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .staged-label { color: var(--vscode-testing-iconPassed, inherit); font-weight: 600; }
 button {
