@@ -1,0 +1,7 @@
+{
+  "task": null,
+  "note": "Linear-chain authored core: a second intent (soft-readability) reuses each layer's fixed commit subject from core.yaml, so its commits read 'feat(contract): plan and provider types' etc. — misleading in git log, and hedgehog boundary reports 'undecidable' because the subject matches both intents' package tasks. Also: .hedgehog/noop records written in an intent worktree were left untracked and blocked 'hedgehog merge' from removing the worktree; trunk's graph showed the no-op task as planned until they were copied over and db rebuild ran.",
+  "logged_at": "2026-11-15T21:12:16.440Z",
+  "resolved_at": null,
+  "resolved_reason": null
+}
