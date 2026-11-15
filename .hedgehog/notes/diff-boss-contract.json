@@ -10,6 +10,26 @@
       "kind": "decision",
       "note": "Working tree drift (edge case, keep it minimal): before every stage/unstage/discard the host runs git apply --check for that hunk. On failure the action is refused and the host sends a 'stale' state; the webview shows a 'Files changed since this plan was made' banner with a Rerun review button (recollect hunks + replan) and disables actions until the rerun completes. No file watcher, no plan merging. The contract's messages include the stale state and the rerun request.",
       "logged_at": "2026-11-15T05:58:44.169Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Contract schemas are shape-only. The plan layer owns every content rule, in plan.md's order. A stage count outside 1..12 is reported as '✗ stages: <n> stages, use 1 to 12 …' (plan.md has no message for it, so this is the chosen wording). Stage has no breaking field; plans never carry '!'.",
+      "logged_at": "2026-11-15T06:04:07.901Z"
+    },
+    {
+      "kind": "decision",
+      "note": "ScratchIndex.apply returns one result per hunk in order and keeps trying later hunks after a failure; the plan layer reports a ✗ order line for each failed hunk.",
+      "logged_at": "2026-11-15T06:04:08.285Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Skill is { body, references }: body = SKILL.md text, references = map of file name (PLAN.md, STAGES.md, WRITING.md) to text. The provider layer loads skill/ into this shape and does not change the contract.",
+      "logged_at": "2026-11-15T06:04:08.663Z"
+    },
+    {
+      "kind": "decision",
+      "note": "Webview actions reference hunks by id; the host resolves file and first line for Open file. ReviewState.currentStage and ReviewStage.commitMessage/committed drive Skip, Commit and the pre-filled message.",
+      "logged_at": "2026-11-15T06:04:09.041Z"
     }
   ]
 }
