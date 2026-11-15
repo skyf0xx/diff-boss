@@ -73,6 +73,8 @@ export function buildUserMessage(input: PlanningInput, previousProblems?: readon
 export function buildEnv(source: NodeJS.ProcessEnv): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...source };
   for (const name of STRIPPED_ENV_VARS) delete env[name];
+  // The account's claude.ai connectors load even with `tools: []`; a call to one ends the single turn.
+  env.ENABLE_CLAUDEAI_MCP_SERVERS = "false";
   return env;
 }
 
@@ -105,6 +107,8 @@ export class ClaudeAgentProvider implements Provider {
       // without it the same plan takes ~25 s.
       thinking: { type: "disabled" },
       settingSources: [],
+      mcpServers: {},
+      strictMcpConfig: true,
       persistSession: false,
       permissionMode: "dontAsk",
       env: buildEnv(this.env),

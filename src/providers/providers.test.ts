@@ -220,6 +220,9 @@ describe("ClaudeAgentProvider", () => {
     expect(o.settingSources).toEqual([]);
     expect(o.persistSession).toBe(false);
     expect(o.thinking).toEqual({ type: "disabled" });
+    expect(o.mcpServers).toEqual({});
+    expect(o.strictMcpConfig).toBe(true);
+    expect(o.env?.ENABLE_CLAUDEAI_MCP_SERVERS).toBe("false");
     expect(o.abortController).toBeInstanceOf(AbortController);
   });
 
@@ -254,7 +257,7 @@ describe("ClaudeAgentProvider", () => {
     const env = { PATH: "/bin", HOME: "/h", ANTHROPIC_API_KEY: "sk-secret", ANTHROPIC_AUTH_TOKEN: "tok" };
     await new ClaudeAgentProvider({ query, env }).generatePlan(input, skill);
     const o = (calls[0] as Call).options as Options;
-    expect(o.env).toEqual({ PATH: "/bin", HOME: "/h" });
+    expect(o.env).toEqual({ PATH: "/bin", HOME: "/h", ENABLE_CLAUDEAI_MCP_SERVERS: "false" });
     expect(JSON.stringify(o)).not.toMatch(/sk-secret|apiKey|api_key/i);
     expect(env.ANTHROPIC_API_KEY).toBe("sk-secret");
   });
