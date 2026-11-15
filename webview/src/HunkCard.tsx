@@ -29,6 +29,11 @@ export function HunkCard({ hunk, disabled, pendingDiscard, ...on }: Props) {
         <span className="card-status">{hunk.status}</span>
       </header>
       <p className="card-summary">{hunk.summary}</p>
+      {hunk.readabilityGrade !== undefined && (
+        <p className="readability" title="Reading grade above 8. The summary may use long or uncommon words.">
+          Hard to read · grade {hunk.readabilityGrade.toFixed(1)}
+        </p>
+      )}
       {hunk.needs.length > 0 && (
         <ul className="needs" aria-label="Dependencies">
           {hunk.needs.map((n) => (
