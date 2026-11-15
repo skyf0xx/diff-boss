@@ -15,19 +15,26 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+/** Twenty leading lines push each change away from line 1. */
+const PAD = Array.from({ length: 20 }, (_, i) => `pad ${i + 1}\n`).join("");
+
 /** Two files, each changed once, so the review has two hunks. */
-function makeRepo(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "diff-boss-it-")));
+function makeRepo(name?: string): string {
+  let dir = realpathSync(mkdtempSync(join(tmpdir(), "diff-boss-it-")));
+  if (name) {
+    dir = join(dir, name);
+    mkdirSync(dir);
+  }
   git(dir, "init", "-q");
   git(dir, "config", "user.email", "test@example.com");
   git(dir, "config", "user.name", "Test");
   git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(join(dir, "a.txt"), "one\ntwo\nthree\n");
-  writeFileSync(join(dir, "b.txt"), "red\ngreen\nblue\n");
+  writeFileSync(join(dir, "a.txt"), PAD + "one\ntwo\nthree\n");
+  writeFileSync(join(dir, "b.txt"), PAD + "red\ngreen\nblue\n");
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "chore: start");
-  writeFileSync(join(dir, "a.txt"), "one\nTWO\nthree\n");
-  writeFileSync(join(dir, "b.txt"), "red\ngreen\nBLUE\n");
+  writeFileSync(join(dir, "a.txt"), PAD + "one\nTWO\nthree\n");
+  writeFileSync(join(dir, "b.txt"), PAD + "red\ngreen\nBLUE\n");
   return dir;
 }
 
@@ -61,9 +68,9 @@ let seen: HostToWebview[] = [];
 let unobserve: () => void = () => {};
 const repos: string[] = [];
 
-async function newRepoInWorkspace(): Promise<string> {
-  const dir = makeRepo();
-  repos.push(dir);
+async function newRepoInWorkspace(name?: string): Promise<string> {
+  const dir = makeRepo(name);
+  repos.push(name ? join(dir, "..") : dir);
   api.overrideWorkspaceFolders([dir]);
   return dir;
 }
@@ -204,7 +211,7 @@ suite("diff-boss extension", () => {
     const dir = await newRepoInWorkspace();
     const controller = await startReview(dir);
     const first = lastReview().stages[0]!.hunks[0]!;
-    const original = first.file === "a.txt" ? "one\ntwo\nthree\n" : "red\ngreen\nblue\n";
+    const original = first.file === "a.txt" ? PAD + "one\ntwo\nthree\n" : PAD + "red\ngreen\nblue\n";
     const edited = readFileSync(join(dir, first.file), "utf8");
     assert.notStrictEqual(edited, original);
 
@@ -226,6 +233,7 @@ suite("diff-boss extension", () => {
     writeFileSync(path, readFileSync(path, "utf8").replace(/TWO|BLUE/, "CHANGED AGAIN"));
     const drifted = readFileSync(path, "utf8");
 
+    await controller.handleMessage({ type: "requestDiscard", hunkId: first.id });
     await controller.handleMessage({ type: "confirmDiscard", hunkId: first.id });
     assert.ok(seen.some((m) => m.type === "stale"));
     assert.strictEqual(readFileSync(path, "utf8"), drifted, "a stale discard changes nothing");
@@ -277,6 +285,8 @@ suite("diff-boss extension", () => {
     const editor = vscode.window.activeTextEditor;
     assert.ok(editor, "an editor is open");
     assert.strictEqual(editor.document.uri.fsPath, join(dir, first.file));
+    // The change is on line 22; the hunk starts three context lines earlier, at line 19.
+    assert.strictEqual(editor.selection.active.line, 18);
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
   });
 
@@ -300,6 +310,21 @@ suite("diff-boss extension", () => {
     await api.handleUri(uri);
     const controller = api.controller();
     assert.ok(controller);
+    await controller.idle();
+    assert.strictEqual(lastReview().stages.length, 2);
+  });
+
+  test("a URI path with +, %, & and spaces reaches the right repo", async () => {
+    const dir = await newRepoInWorkspace("c++ 100% a&b");
+    // A clean decoy listed first: if `path` were ignored, the review would run here and fail.
+    const decoy = realpathSync(mkdtempSync(join(tmpdir(), "diff-boss-decoy-")));
+    repos.push(decoy);
+    git(decoy, "init", "-q");
+    api.overrideWorkspaceFolders([decoy, dir]);
+    const uri = vscode.Uri.parse(`vscode://${EXTENSION_ID}/review?path=${encodeURIComponent(dir)}`);
+    await api.handleUri(uri);
+    const controller = api.controller();
+    assert.ok(controller, "the path was accepted");
     await controller.idle();
     assert.strictEqual(lastReview().stages.length, 2);
   });

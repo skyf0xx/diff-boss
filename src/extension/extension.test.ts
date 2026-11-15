@@ -6,7 +6,7 @@ import type { Hunk } from "../contract/hunk";
 import type { HostToWebview } from "../contract/messages";
 import { GitCommandError, ProviderError } from "../contract/ports";
 import type { GitPort, Provider } from "../contract/ports";
-import { LaunchRefusedError, resolveRepoPath } from "./activate";
+import { LaunchRefusedError, parsePathParam, resolveRepoPath } from "./activate";
 import { CLAUDE_NOT_FOUND_MESSAGE, createClaudeQuery, findClaudeExecutable } from "./claude-runtime";
 import { ReviewController, type ControllerDeps } from "./controller";
 import { firstNewLine } from "./hunk-location";
@@ -27,11 +27,15 @@ describe("settings", () => {
 });
 
 describe("firstNewLine", () => {
-  it("reads the new-side start", () => {
-    expect(firstNewLine("@@ -10,4 +12,6 @@ fn")).toBe(12);
-    expect(firstNewLine("@@ -1 +1 @@")).toBe(1);
-    expect(firstNewLine("@@ -3,2 +0,0 @@")).toBe(1);
-    expect(firstNewLine("garbage")).toBe(1);
+  const withHunk = (h: string) => `diff --git a/f b/f\n--- a/f\n+++ b/f\n${h}\n-x\n+y\n`;
+  it("reads the new-side start of the first hunk header in a patch", () => {
+    expect(firstNewLine(withHunk("@@ -10,4 +12,6 @@ fn"))).toBe(12);
+    expect(firstNewLine(withHunk("@@ -1 +1 @@"))).toBe(1);
+    expect(firstNewLine(withHunk("@@ -3,2 +0,0 @@"))).toBe(1);
+    expect(firstNewLine("diff --git a/f b/f\nnew mode 100755\n")).toBe(1);
+  });
+  it("uses the first @@ only", () => {
+    expect(firstNewLine(withHunk("@@ -2 +5 @@") + "@@ -40 +90 @@\n")).toBe(5);
   });
 });
 
@@ -49,6 +53,31 @@ describe("renderHtml", () => {
   });
 });
 
+describe("renderHtml CSP placement", () => {
+  it("puts the CSP meta before every script and link, and the script carries the nonce", () => {
+    const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="./assets/a.css"><script type="module" src="./assets/a.js"></script></head><body></body></html>`;
+    const out = renderHtml(html, { nonce: "N0NCE", cspSource: "SRC", assetUri: (r) => `vsc://x/${r}` });
+    const meta = out.indexOf("Content-Security-Policy");
+    const script = out.indexOf("<script");
+    expect(meta).toBeGreaterThan(-1);
+    expect(meta).toBeLessThan(script);
+    expect(meta).toBeLessThan(out.indexOf("<link"));
+    expect(meta).toBeLessThan(out.indexOf('<meta charset'));
+    expect(out.slice(script)).toMatch(/^<script nonce="N0NCE" type="module"/);
+  });
+});
+
+describe("parsePathParam", () => {
+  it("takes the already-decoded value literally, including +, % and &", () => {
+    expect(parsePathParam("path=/tmp/a+b")).toBe("/tmp/a+b");
+    expect(parsePathParam("path=/tmp/c++ 100% a&b")).toBe("/tmp/c++ 100% a&b");
+    expect(parsePathParam("x=1&path=/tmp/a b")).toBe("/tmp/a b");
+    expect(parsePathParam("path=")).toBe("");
+    expect(parsePathParam("other=1")).toBeUndefined();
+    expect(parsePathParam("")).toBeUndefined();
+  });
+});
+
 describe("resolveRepoPath", () => {
   it("defaults to the first folder, accepts inside paths, refuses outside ones", () => {
     const a = tmp();
@@ -57,10 +86,38 @@ describe("resolveRepoPath", () => {
     expect(resolveRepoPath(undefined, [a, b])).toBe(a);
     expect(resolveRepoPath(join(a, "sub"), [a])).toBe(join(a, "sub"));
     expect(() => resolveRepoPath(b, [a])).toThrow(LaunchRefusedError);
-    expect(() => resolveRepoPath(join(a, "..", "x"), [a])).toThrow(/outside the open workspace folders/);
+    expect(() => resolveRepoPath(join(a, "..", "x"), [a])).toThrow(LaunchRefusedError);
+    expect(() => resolveRepoPath(join(a, ".."), [a])).toThrow(/outside the open workspace folders/);
     expect(() => resolveRepoPath(undefined, [])).toThrow(LaunchRefusedError);
     rmSync(a, { recursive: true });
     rmSync(b, { recursive: true });
+  });
+  it("refuses a symlink inside the workspace that points outside it", () => {
+    const ws = tmp();
+    const outside = tmp();
+    symlinkSync(outside, join(ws, "escape"));
+    expect(() => resolveRepoPath(join(ws, "escape"), [ws])).toThrow(/outside the open workspace folders/);
+  });
+  it("returns the real path of an accepted symlink", () => {
+    const ws = tmp();
+    mkdirSync(join(ws, "real"));
+    symlinkSync(join(ws, "real"), join(ws, "alias"));
+    expect(resolveRepoPath(join(ws, "alias"), [ws])).toBe(join(ws, "real"));
+  });
+  it("refuses a target that cannot be resolved", () => {
+    const ws = tmp();
+    expect(() => resolveRepoPath(join(ws, "missing"), [ws])).toThrow(LaunchRefusedError);
+  });
+  it("accepts a directory literally named ..foo", () => {
+    const ws = tmp();
+    mkdirSync(join(ws, "..foo"));
+    expect(resolveRepoPath(join(ws, "..foo"), [ws])).toBe(join(ws, "..foo"));
+  });
+  it("refuses a sibling that shares the folder name as a prefix", () => {
+    const root = tmp();
+    mkdirSync(join(root, "repo"));
+    mkdirSync(join(root, "repo-evil"));
+    expect(() => resolveRepoPath(join(root, "repo-evil"), [join(root, "repo")])).toThrow(LaunchRefusedError);
   });
   it("sees through a symlinked folder", () => {
     const real = tmp();
@@ -104,11 +161,14 @@ describe("claude runtime", () => {
   });
 });
 
-const hunk = (id: string, file: string): Hunk => ({ id, file, status: "modified", header: "@@ -1 +1 @@", patch: `p-${id}` });
+const hunk = (id: string, file: string, at = "@@ -1 +1 @@"): Hunk => {
+  const header = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n`;
+  return { id, file, status: "modified", header, patch: `${header}${at}\n-x\n+y\n` };
+};
 
 function setup(over: Partial<ControllerDeps> = {}, provider?: Provider) {
   const posted: HostToWebview[] = [];
-  const hunks = [hunk("h1", "a.ts"), hunk("h2", "b.ts")];
+  const hunks = [hunk("h1", "a.ts"), hunk("h2", "b.ts", "@@ -5,2 +7,3 @@")];
   const git: GitPort = {
     collect: vi.fn(async () => ({ hunks, recentCommits: [] })),
     recentCommits: vi.fn(async () => []),
@@ -177,7 +237,7 @@ describe("ReviewController", () => {
     const { controller, git } = setup();
     await controller.start();
     await controller.handleMessage({ type: "stageHunk", hunkId: "h1" });
-    expect(git.stage).toHaveBeenCalledWith(expect.objectContaining({ id: "h1", patch: "p-h1" }));
+    expect(git.stage).toHaveBeenCalledWith(expect.objectContaining({ id: "h1", patch: hunk("h1", "a.ts").patch }));
     expect(git.collect).toHaveBeenCalledTimes(1);
   });
 
@@ -214,6 +274,90 @@ describe("ReviewController", () => {
     expect(posted.at(-1)).toMatchObject({ state: { currentStage: 2 } });
   });
 
+  describe("host-side guards", () => {
+    it("ignores commit and skip for a stage that is not current", async () => {
+      const { controller, git, posted } = setup();
+      await controller.start();
+      const n = posted.length;
+      await controller.handleMessage({ type: "commit", stageIndex: 1, message: "m" });
+      await controller.handleMessage({ type: "skip", stageIndex: 1 });
+      expect(git.commit).not.toHaveBeenCalled();
+      expect(posted.length).toBe(n);
+    });
+
+    it("ignores a second commit of an already committed stage", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "commit", stageIndex: 0, message: "m" });
+      await controller.handleMessage({ type: "commit", stageIndex: 0, message: "again" });
+      await controller.handleMessage({ type: "skip", stageIndex: 0 });
+      expect(git.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores confirmDiscard without a pending request", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+
+    it("ignores confirmDiscard for a different hunk than requested", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h2" });
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+
+    it("uses a pending request once", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      expect(git.discard).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears a pending request on any other action", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      await controller.handleMessage({ type: "openFile", hunkId: "h2" });
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+
+    it("clears a pending request even when the actions are sent back to back", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      void controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      void controller.handleMessage({ type: "openFile", hunkId: "h2" });
+      void controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      await controller.idle();
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+
+    it("refuses to discard a staged hunk and says to unstage first", async () => {
+      const { controller, git, host, posted } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "stageHunk", hunkId: "h1" });
+      await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      expect(posted.some((m) => m.type === "confirmDiscard")).toBe(false);
+      expect(host.showError).toHaveBeenCalledWith(expect.stringContaining("unstage"));
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+
+    it("refuses a confirmed discard if the hunk was staged after the request", async () => {
+      const { controller, git } = setup();
+      await controller.start();
+      await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
+      await controller.handleMessage({ type: "stageHunk", hunkId: "h1" });
+      await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
+      expect(git.discard).not.toHaveBeenCalled();
+    });
+  });
+
   it("keeps the review and shows an error when a git action throws", async () => {
     const { controller, git, host, posted } = setup();
     await controller.start();
@@ -227,7 +371,7 @@ describe("ReviewController", () => {
     const { controller, host } = setup();
     await controller.start();
     await controller.handleMessage({ type: "openFile", hunkId: "h2" });
-    expect(host.openFile).toHaveBeenCalledWith("/repo/b.ts", 1);
+    expect(host.openFile).toHaveBeenCalledWith("/repo/b.ts", 7);
   });
 
   it("ignores messages that fail the contract schema", async () => {

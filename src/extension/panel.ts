@@ -23,7 +23,7 @@ export function renderHtml(
     .replace(/(src|href)="\.\/(assets\/[^"]*)"/g, (_m, attr: string, rel: string) => `${attr}="${assetUri(rel)}"`)
     .replace(/<script\b(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
   const csp = `<meta http-equiv="Content-Security-Policy" content="${buildCsp(nonce, cspSource)}">`;
-  return rewritten.replace("</head>", `    ${csp}\n  </head>`);
+  return rewritten.replace(/<head(\s[^>]*)?>/i, (open) => `${open}\n    ${csp}`);
 }
 
 export class ReviewPanel {

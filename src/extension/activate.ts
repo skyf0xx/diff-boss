@@ -27,24 +27,37 @@ function realOrSame(p: string): string {
 
 function isInside(folder: string, target: string): boolean {
   const rel = path.relative(folder, target);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
 }
 
-/** The repository to review, or a refusal naming why not. */
+/** The repository to review, or a refusal naming why not. Returns the real path. */
 export function resolveRepoPath(requested: string | undefined, folders: readonly string[]): string {
   if (folders.length === 0) {
     throw new LaunchRefusedError("Open a folder first: diff-boss reviews the repository of an open workspace folder");
   }
   if (requested === undefined || requested === "") return folders[0]!;
-  const target = path.resolve(requested);
-  const real = realOrSame(target);
-  const allowed = folders.some(
-    (f) => isInside(path.resolve(f), target) || isInside(realOrSame(f), real),
-  );
-  if (!allowed) {
+  let real: string;
+  try {
+    real = fs.realpathSync(path.resolve(requested));
+  } catch {
+    throw new LaunchRefusedError(`Refusing to review ${requested}: the path cannot be resolved`);
+  }
+  if (!folders.some((f) => isInside(realOrSame(f), real))) {
     throw new LaunchRefusedError(`Refusing to review ${requested}: it is outside the open workspace folders`);
   }
-  return target;
+  return real;
+}
+
+/** Reads the `path` query parameter, keeping `+` literal (a path is not form-encoded). */
+/**
+ * `path` is the link's only parameter, so its value is everything after `path=`. `query` is
+ * `vscode.Uri.query`, which VS Code has already percent-decoded, so `&`, `+` and `%` in the
+ * value are literal and are not decoded again.
+ */
+export function parsePathParam(query: string): string | undefined {
+  const at = query.startsWith("path=") ? 0 : query.indexOf("&path=") + 1;
+  if (at === 0 && !query.startsWith("path=")) return undefined;
+  return query.slice(at + "path=".length);
 }
 
 export interface DiffBossTestApi {
@@ -162,7 +175,13 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
       showError(`diff-boss: unknown link ${uri.path}; expected ${REVIEW_URI_PATH}`);
       return;
     }
-    const requested = new URLSearchParams(uri.query).get("path") ?? undefined;
+    let requested: string | undefined;
+    try {
+      requested = parsePathParam(uri.query);
+    } catch {
+      showError("diff-boss: the link has a malformed path");
+      return;
+    }
     await launch(requested);
   }
 

@@ -40,6 +40,7 @@ export class ReviewController {
   private generation = 0;
   private queue: Promise<void> = Promise.resolve();
   private disposed = false;
+  private pendingDiscard: string | undefined;
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -47,6 +48,7 @@ export class ReviewController {
   start(): Promise<void> {
     const run = ++this.generation;
     this.state = undefined;
+    this.pendingDiscard = undefined;
     this.hunks = new Map();
     this.stale = false;
     this.emitView({ type: "loading" });
@@ -75,19 +77,19 @@ export class ReviewController {
       case "rerun":
         return this.start();
       case "stageHunk":
-        return this.enqueue(() => this.stageOrUnstage(msg.hunkId, "stage"));
+        return this.enqueueAction(() => this.stageOrUnstage(msg.hunkId, "stage"));
       case "unstageHunk":
-        return this.enqueue(() => this.stageOrUnstage(msg.hunkId, "unstage"));
+        return this.enqueueAction(() => this.stageOrUnstage(msg.hunkId, "unstage"));
       case "requestDiscard":
-        return this.enqueue(async () => this.requestDiscard(msg.hunkId));
+        return this.enqueueAction(async () => this.requestDiscard(msg.hunkId));
       case "confirmDiscard":
         return this.enqueue(() => this.discard(msg.hunkId));
       case "openFile":
-        return this.enqueue(() => this.openFile(msg.hunkId));
+        return this.enqueueAction(() => this.openFile(msg.hunkId));
       case "commit":
-        return this.enqueue(() => this.commit(msg.stageIndex, msg.message));
+        return this.enqueueAction(() => this.commit(msg.stageIndex, msg.message));
       case "skip":
-        return this.enqueue(async () => this.skip(msg.stageIndex));
+        return this.enqueueAction(async () => this.skip(msg.stageIndex));
     }
   }
 
@@ -95,6 +97,14 @@ export class ReviewController {
     const next = this.queue.then(task, task).catch((err: unknown) => this.actionFailed(err));
     this.queue = next;
     return next;
+  }
+
+  /** Any action other than confirming a discard withdraws a pending discard request. */
+  private enqueueAction(task: () => Promise<void>): Promise<void> {
+    return this.enqueue(() => {
+      this.pendingDiscard = undefined;
+      return task();
+    });
   }
 
   private post(message: HostToWebview): void {
@@ -186,12 +196,27 @@ export class ReviewController {
 
   private requestDiscard(hunkId: string): void {
     if (!this.state || !this.hunkFor(hunkId) || this.stale) return;
+    if (this.isStaged(hunkId)) {
+      this.deps.host.showError("diff-boss: unstage this hunk before discarding it");
+      return;
+    }
+    this.pendingDiscard = hunkId;
     this.post({ type: "confirmDiscard", hunkId, dependents: dependentsOf(this.state, hunkId) });
   }
 
+  private isStaged(hunkId: string): boolean {
+    return (this.state?.stages ?? []).some((s) => s.hunks.some((h) => h.id === hunkId && h.staged));
+  }
+
   private async discard(hunkId: string): Promise<void> {
+    const pending = this.pendingDiscard;
+    this.pendingDiscard = undefined;
     const hunk = this.hunkFor(hunkId);
-    if (!hunk || !this.state || this.stale) return;
+    if (pending !== hunkId || !hunk || !this.state || this.stale) return;
+    if (this.isStaged(hunkId)) {
+      this.deps.host.showError("diff-boss: unstage this hunk before discarding it");
+      return;
+    }
     if (!(await this.applies(hunk, "discard"))) return;
     await this.deps.git.discard(hunk);
     // The change is gone from the tree, so the card goes; numbers stay as planned.
@@ -204,13 +229,14 @@ export class ReviewController {
     const hunk = this.hunkFor(hunkId);
     if (!hunk) return;
     const root = await this.deps.repoRoot();
-    await this.deps.host.openFile(`${root}/${hunk.file}`, firstNewLine(hunk.header));
+    await this.deps.host.openFile(`${root}/${hunk.file}`, firstNewLine(hunk.patch));
   }
 
   private async commit(stageIndex: number, message: string): Promise<void> {
     const state = this.state;
     const stage = state?.stages[stageIndex];
     if (!state || !stage || this.stale) return;
+    if (stageIndex !== state.currentStage || stage.committed) return;
     await this.deps.git.commit(message);
     stage.committed = true;
     stage.commitMessage = message;
@@ -220,7 +246,9 @@ export class ReviewController {
 
   private skip(stageIndex: number): void {
     const state = this.state;
-    if (!state || !state.stages[stageIndex] || this.stale) return;
+    const stage = state?.stages[stageIndex];
+    if (!state || !stage || this.stale) return;
+    if (stageIndex !== state.currentStage || stage.committed) return;
     state.currentStage = Math.min(stageIndex + 1, state.stages.length);
     this.emitState();
   }
