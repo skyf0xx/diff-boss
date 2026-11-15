@@ -1,0 +1,14 @@
+# Changelog
+
+## 0.0.0 (unreleased)
+
+- Collects unstaged Git hunks (modified, added, deleted, renamed and untracked files) with ids that stay the same while the working tree is unchanged.
+- Asks a provider for a plan of conventional-commit stages in reading order, with one plain sentence per hunk.
+- Validates every plan (hunk coverage, stage headers, summary length and reading grade, `needs` order, and a scratch-index apply check) and sends the problems back to the provider, up to `diffBoss.maxAttempts` times.
+- Claude Agent SDK provider that uses the local Claude Code login. No API key.
+- Provider registry, so a second provider can be added without touching the validator, Git or the review view.
+- Review view with stages, hunk cards, "Needs hunk n" labels, Stage, Unstage, Discard (with a dependents warning), Open file, an editable commit message, Commit and Skip.
+- "Files changed since this plan was made" banner with Rerun review when the working tree drifts.
+- Command `diff-boss: Review unstaged changes` and the `vscode://diff-boss.diff-boss/review?path=<repo>` URI handler.
+- Settings `diffBoss.provider`, `diffBoss.model` and `diffBoss.maxAttempts`.
+- `pnpm smoke:live` live check and `pnpm package` to build a `.vsix`.
