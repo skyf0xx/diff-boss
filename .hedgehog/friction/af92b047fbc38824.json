@@ -1,0 +1,7 @@
+{
+  "task": "DIFF-BOSS-EXTENSION",
+  "note": "End-of-build reviewer found 3 acceptance-breaking bugs the layer verifies passed: Open file always line 1 (unit tests fed a fake header containing @@; integration test never asserted the line), untracked nested repo / directory breaks collect(), C-quoted file names throw. Plus a URI symlink escape and CSP meta injected after the module script. Lesson: the extension layer's integration tests should assert outcomes (selection line, refusal of symlinked paths), not just that calls succeed.",
+  "logged_at": "2026-11-15T06:26:44.032Z",
+  "resolved_at": null,
+  "resolved_reason": null
+}

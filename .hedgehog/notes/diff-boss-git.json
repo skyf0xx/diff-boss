@@ -11,6 +11,11 @@
       "resolves": "2026-11-15T06:07:08.142Z",
       "reason": "ReviewController keeps the planning-read Hunk objects and acts on their stored patches with checkApplies before each action; covered by the stage/unstage/discard/stale integration tests.",
       "logged_at": "2026-11-15T06:23:07.040Z"
+    },
+    {
+      "kind": "debt",
+      "note": "Stored hunks are re-applied via git apply offset search after other hunks in the same file are staged/discarded/committed. With repeated identical context (boilerplate blocks) a pure-addition hunk could land on the wrong block while --check passes. Not reproduced. Mitigation if it bites: after staging, compare git diff --cached against the expected hunk, or recompute @@ offsets like git add -p.",
+      "logged_at": "2026-11-15T06:26:44.420Z"
     }
   ]
 }
