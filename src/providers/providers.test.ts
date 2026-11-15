@@ -211,6 +211,27 @@ describe("ClaudeAgentProvider", () => {
     expect(prompt).toMatch(/Fix every line above and return the whole plan again/);
   });
 
+  it("sends its previous reply back on a retry and forgets it on a fresh plan", async () => {
+    const replies = ['{"stages":["first"]}', '{"stages":["second"]}', '{"stages":["third"]}'];
+    const prompts: string[] = [];
+    const query: ClaudeQueryFn = (params) => {
+      prompts.push(params.prompt);
+      const text = replies[prompts.length - 1]!;
+      return (async function* () {
+        yield result(text);
+      })();
+    };
+    const p = new ClaudeAgentProvider({ query });
+    const problems = [{ field: "hunks", message: "x isn't in any stage, add it" }];
+    await p.generatePlan(input, skill);
+    await p.generatePlan(input, skill, problems);
+    expect(prompts[1]).toContain('This is the plan you returned last time:\n\n{"stages":["first"]}');
+    expect(prompts[1]).toContain("✗ hunks: x isn't in any stage, add it");
+    expect(prompts[1]).toMatch(/Change only what these lines name/);
+    await p.generatePlan(input, skill);
+    expect(prompts[2]).not.toContain("returned last time");
+  });
+
   it("disables tools and one-shots the session", async () => {
     const { query, calls } = fakeQuery([result("{}")]);
     await new ClaudeAgentProvider({ query }).generatePlan(input, skill);

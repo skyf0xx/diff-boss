@@ -55,16 +55,25 @@ export function buildSystemPrompt(skill: Skill): string {
   return parts.join("\n\n---\n\n");
 }
 
-export function buildUserMessage(input: PlanningInput, previousProblems?: readonly Problem[]): string {
+export function buildUserMessage(
+  input: PlanningInput,
+  previousProblems?: readonly Problem[],
+  previousPlan?: string,
+): string {
   const lines = ["Plan the review for this input.", "", JSON.stringify(input, null, 2)];
   if (previousProblems && previousProblems.length > 0) {
+    if (previousPlan !== undefined) {
+      lines.push("", "This is the plan you returned last time:", "", previousPlan);
+    }
     lines.push(
       "",
-      "The plan you returned last time was rejected with these problems:",
+      "It was rejected with these problems:",
       "",
       ...formatProblems(previousProblems),
       "",
-      "Fix every line above and return the whole plan again, as one JSON object and nothing else.",
+      previousPlan !== undefined
+        ? "Change only what these lines name, keep everything else as it is, and return the whole plan again, as one JSON object and nothing else."
+        : "Fix every line above and return the whole plan again, as one JSON object and nothing else.",
     );
   }
   return lines.join("\n");
@@ -88,6 +97,8 @@ export class ClaudeAgentProvider implements Provider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly cwd: string | undefined;
   private readonly timeoutMs: number;
+  /** The last reply, sent back on a retry so the model edits its plan instead of starting over. */
+  private lastReply: string | undefined;
 
   constructor(options: ClaudeAgentProviderOptions = {}) {
     this.model = options.model?.trim() || DEFAULT_CLAUDE_MODEL;
@@ -118,7 +129,9 @@ export class ClaudeAgentProvider implements Provider {
   }
 
   async generatePlan(input: PlanningInput, skill: Skill, previousProblems?: readonly Problem[]): Promise<string> {
-    const prompt = buildUserMessage(input, previousProblems);
+    const retrying = previousProblems !== undefined && previousProblems.length > 0;
+    if (!retrying) this.lastReply = undefined;
+    const prompt = buildUserMessage(input, previousProblems, retrying ? this.lastReply : undefined);
     let assistantError: string | undefined;
     let result: Extract<SDKMessage, { type: "result" }> | undefined;
     const abortController = new AbortController();
@@ -147,7 +160,8 @@ export class ClaudeAgentProvider implements Provider {
         result.subtype === "success" ? result.result : result.errors.join("; ") || result.subtype;
       throw this.fail(assistantError ?? detail, detail);
     }
-    return unwrapCodeFence(result.result);
+    this.lastReply = unwrapCodeFence(result.result);
+    return this.lastReply;
   }
 
   private fail(signal: string, detail: string): ProviderError {
