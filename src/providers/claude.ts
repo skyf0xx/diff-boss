@@ -10,6 +10,9 @@ export const DEFAULT_CLAUDE_MODEL = "sonnet";
 
 export const NOT_SIGNED_IN_MESSAGE = "Claude Code is not signed in, run `claude` and log in";
 
+/** One attempt without extended thinking takes well under a minute on a typical diff. */
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = 120_000;
+
 /** Variables that would switch the SDK from the local login to key-based auth. */
 export const STRIPPED_ENV_VARS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const;
 
@@ -22,6 +25,8 @@ export interface ClaudeAgentProviderOptions {
   /** Environment the SDK subprocess inherits; defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** An attempt that has not finished by then is aborted and fails with a `ProviderError`. */
+  timeoutMs?: number;
 }
 
 const defaultQuery: ClaudeQueryFn = (params) => {
@@ -74,12 +79,14 @@ export class ClaudeAgentProvider implements Provider {
   private readonly query: ClaudeQueryFn;
   private readonly env: NodeJS.ProcessEnv;
   private readonly cwd: string | undefined;
+  private readonly timeoutMs: number;
 
   constructor(options: ClaudeAgentProviderOptions = {}) {
     this.model = options.model?.trim() || DEFAULT_CLAUDE_MODEL;
     this.query = options.query ?? defaultQuery;
     this.env = options.env ?? process.env;
     this.cwd = options.cwd;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS;
   }
 
   buildOptions(skill: Skill): Options {
@@ -88,6 +95,9 @@ export class ClaudeAgentProvider implements Provider {
       systemPrompt: buildSystemPrompt(skill),
       tools: [],
       maxTurns: 1,
+      // Adaptive thinking spent ~18k tokens and ~3 minutes per attempt on a 38-hunk diff;
+      // without it the same plan takes ~25 s.
+      thinking: { type: "disabled" },
       settingSources: [],
       persistSession: false,
       permissionMode: "dontAsk",
@@ -101,14 +111,22 @@ export class ClaudeAgentProvider implements Provider {
     const prompt = buildUserMessage(input, previousProblems);
     let assistantError: string | undefined;
     let result: Extract<SDKMessage, { type: "result" }> | undefined;
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
+    const timedOut = () =>
+      new ProviderError(`Claude did not answer within ${Math.ceil(this.timeoutMs / 1000)} s`, this.id);
     try {
-      for await (const message of this.query({ prompt, options: this.buildOptions(skill) })) {
+      for await (const message of this.query({ prompt, options: { ...this.buildOptions(skill), abortController } })) {
         if (message.type === "assistant" && message.error) assistantError = message.error;
         else if (message.type === "result") result = message;
       }
     } catch (err) {
+      if (abortController.signal.aborted) throw timedOut();
       throw this.wrap(err);
+    } finally {
+      clearTimeout(timer);
     }
+    if (abortController.signal.aborted && !result) throw timedOut();
 
     if (!result) {
       if (assistantError) throw this.fail(assistantError, assistantError);

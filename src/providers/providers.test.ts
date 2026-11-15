@@ -210,6 +210,24 @@ describe("ClaudeAgentProvider", () => {
     expect(o.maxTurns).toBe(1);
     expect(o.settingSources).toEqual([]);
     expect(o.persistSession).toBe(false);
+    expect(o.thinking).toEqual({ type: "disabled" });
+    expect(o.abortController).toBeInstanceOf(AbortController);
+  });
+
+  it("aborts an attempt that runs past the timeout and reports it", async () => {
+    let signal: AbortSignal | undefined;
+    const query: ClaudeQueryFn = (params) => {
+      signal = params.options?.abortController?.signal;
+      return (async function* () {
+        await new Promise((_, reject) => signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+      })();
+    };
+    const err = await new ClaudeAgentProvider({ query, timeoutMs: 20 })
+      .generatePlan(input, skill)
+      .catch((e: unknown) => e);
+    expect(signal?.aborted).toBe(true);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect((err as Error).message).toBe("Claude did not answer within 1 s");
   });
 
   it("uses the default model and honours the constructor option", async () => {
