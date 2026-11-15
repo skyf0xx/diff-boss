@@ -1,10 +1,52 @@
 {
   "name": "diff-boss",
   "displayName": "diff-boss",
+  "description": "Turns unstaged Git hunks into a validated, stage-by-stage review plan, then stages, discards and commits each stage from one review view.",
+  "publisher": "diff-boss",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
   "main": "./dist/extension.js",
+  "categories": [
+    "SCM Providers"
+  ],
+  "activationEvents": [
+    "onCommand:diffBoss.review",
+    "onUri"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "diffBoss.review",
+        "title": "diff-boss: Review unstaged changes"
+      }
+    ],
+    "configuration": {
+      "title": "diff-boss",
+      "properties": {
+        "diffBoss.provider": {
+          "type": "string",
+          "enum": [
+            "claude"
+          ],
+          "default": "claude",
+          "description": "Plan provider. The Claude provider uses your local Claude Code login; no API key is needed."
+        },
+        "diffBoss.model": {
+          "type": "string",
+          "default": "sonnet",
+          "description": "Model the provider asks for, for example sonnet or opus."
+        },
+        "diffBoss.maxAttempts": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "How many times the plan is requested before the review shows the last problems."
+        }
+      }
+    }
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -36,12 +78,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "build:host": "esbuild src/extension/activate.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --sourcemap --outfile=dist/extension.js",
+    "build:host": "esbuild src/extension/activate.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --define:import.meta.url=__importMetaUrl \"--banner:js=const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\" --sourcemap --outfile=dist/extension.js",
     "build:webview": "vite build",
     "build": "pnpm build:host && pnpm build:webview",
     "build:integration": "esbuild \"src/extension/test/**/*.test.ts\" --bundle --platform=node --format=cjs --external:vscode --outdir=out/test",
     "test:integration": "pnpm build && pnpm build:integration && vscode-test",
     "package": "pnpm build && vsce package --no-dependencies --out diff-boss.vsix",
-    "smoke:live": "node scripts/smoke-live.mjs"
+    "smoke:live": "esbuild src/providers/smoke-live.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/smoke-live.mjs && node dist/smoke-live.mjs"
   }
 }
