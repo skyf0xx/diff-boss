@@ -1,6 +1,6 @@
 import type { Plan } from "../contract/plan";
 import type { PlanningInput } from "../contract/hunk";
-import type { Problem } from "../contract/problem";
+import type { Problem, ReadabilityWarning } from "../contract/problem";
 import type { Provider, ScratchIndex, Skill } from "../contract/ports";
 import { validatePlan } from "./validate";
 
@@ -14,7 +14,7 @@ export interface RunPlannerOptions {
 }
 
 export type PlannerResult =
-  | { ok: true; plan: Plan; attempts: number }
+  | { ok: true; plan: Plan; attempts: number; warnings: ReadabilityWarning[] }
   | { ok: false; problems: Problem[]; attempts: number };
 
 /**
@@ -34,7 +34,7 @@ export async function runPlanner(options: RunPlannerOptions): Promise<PlannerRes
         ? await provider.generatePlan(input, skill)
         : await provider.generatePlan(input, skill, problems);
     const result = await validatePlan(raw, input, scratchIndex);
-    if (result.plan) return { ok: true, plan: result.plan, attempts: attempt };
+    if (result.plan) return { ok: true, plan: result.plan, attempts: attempt, warnings: result.warnings };
     problems = result.problems;
   }
   return { ok: false, problems, attempts: maxAttempts };
