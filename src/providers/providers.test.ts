@@ -15,6 +15,7 @@ import {
   buildSystemPrompt,
   createDefaultRegistry,
   loadSkill,
+  unwrapCodeFence,
 } from "./index";
 import type { ClaudeQueryFn } from "./index";
 import { fleschKincaidGrade } from "../plan/readability";
@@ -170,6 +171,14 @@ describe("InMemoryProviderRegistry", () => {
 });
 
 describe("ClaudeAgentProvider", () => {
+  it("unwraps one code fence around the whole reply", async () => {
+    const { query } = fakeQuery([result('```json\n{"stages":[]}\n```\n')]);
+    expect(await new ClaudeAgentProvider({ query }).generatePlan(input, skill)).toBe('{"stages":[]}');
+    expect(unwrapCodeFence('```\n{"a":1}\n```')).toBe('{"a":1}');
+    expect(unwrapCodeFence('Here it is:\n```json\n{}\n```')).toBe('Here it is:\n```json\n{}\n```');
+    expect(unwrapCodeFence('{"a":"```"}')).toBe('{"a":"```"}');
+  });
+
   it("returns the raw final text untouched", async () => {
     const { query } = fakeQuery([result('  {"stages":[]}\n')]);
     const p = new ClaudeAgentProvider({ query });

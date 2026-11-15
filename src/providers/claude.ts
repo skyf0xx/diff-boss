@@ -37,6 +37,12 @@ const defaultQuery: ClaudeQueryFn = (params) => {
   return run();
 };
 
+/** Removes one Markdown code fence wrapped around the whole reply; anything else is returned as is. */
+export function unwrapCodeFence(text: string): string {
+  const match = /^\s*```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n```\s*$/.exec(text);
+  return match ? match[1]! : text;
+}
+
 function stripFrontmatter(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, "");
 }
@@ -137,7 +143,7 @@ export class ClaudeAgentProvider implements Provider {
         result.subtype === "success" ? result.result : result.errors.join("; ") || result.subtype;
       throw this.fail(assistantError ?? detail, detail);
     }
-    return result.result;
+    return unwrapCodeFence(result.result);
   }
 
   private fail(signal: string, detail: string): ProviderError {
