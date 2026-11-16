@@ -1,32 +1,19 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Hunk } from "../contract/hunk";
 import type { HostToWebview } from "../contract/messages";
-import { GitCommandError, ProviderError } from "../contract/ports";
-import type { GitPort, Provider } from "../contract/ports";
+import { GitCommandError } from "../contract/ports";
+import type { GitPort } from "../contract/ports";
 import { LaunchRefusedError, parsePathParam, resolveRepoPath } from "./activate";
-import { CLAUDE_NOT_FOUND_MESSAGE, createClaudeQuery, findClaudeExecutable } from "./claude-runtime";
-import { ReviewController, type ControllerDeps } from "./controller";
+import { ReviewController, type ControllerDeps, type PlanSource } from "./controller";
 import { firstNewLine } from "./hunk-location";
-import { FilePlanSource, HUNKS_FILE, PLAN_FILE, RESULT_FILE, buildHunkIndex, handoffDir, writeHunkIndex } from "./handoff";
+import { FilePlanSource, PLAN_FILE, RESULT_FILE, handoffDir } from "./handoff";
 import { runGitChecked } from "../git";
 import { buildCsp, renderHtml } from "./panel";
-import { SettingsError, readSettings } from "./settings";
 
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "db-unit-")));
-
-describe("settings", () => {
-  it("applies defaults", () => {
-    expect(readSettings({ get: () => undefined })).toEqual({ provider: "claude", model: "sonnet", maxAttempts: 3 });
-  });
-  it("rejects a bad maxAttempts with a readable error", () => {
-    const get = <T>(k: string) => (k === "maxAttempts" ? (0 as T) : undefined);
-    expect(() => readSettings({ get })).toThrow(SettingsError);
-    expect(() => readSettings({ get })).toThrow(/diffBoss\.maxAttempts/);
-  });
-});
 
 describe("firstNewLine", () => {
   const withHunk = (h: string) => `diff --git a/f b/f\n--- a/f\n+++ b/f\n${h}\n-x\n+y\n`;
@@ -130,45 +117,28 @@ describe("resolveRepoPath", () => {
   });
 });
 
-describe("claude runtime", () => {
-  it("finds an executable claude on PATH", () => {
-    const dir = tmp();
-    const bin = join(dir, "claude");
-    writeFileSync(bin, "#!/bin/sh\n");
-    chmodSync(bin, 0o755);
-    expect(findClaudeExecutable({ PATH: dir }, "linux", dir)).toBe(realpathSync(bin));
-    expect(findClaudeExecutable({ PATH: "" }, "linux", tmp(), [])).toBeUndefined();
-  });
-
-  it("passes the found executable to the SDK query", async () => {
-    const seen: unknown[] = [];
-    const query = createClaudeQuery(
-      () => "/x/claude",
-      async () => ({
-        query: (params) => {
-          seen.push(params.options);
-          return (async function* () {})();
-        },
-      }),
-    );
-    for await (const _ of query({ prompt: "p", options: { model: "m" } })) void _;
-    expect(seen).toEqual([{ model: "m", pathToClaudeCodeExecutable: "/x/claude" }]);
-  });
-
-  it("throws a named error when claude is not installed", async () => {
-    const query = createClaudeQuery(() => undefined, async () => ({ query: () => (async function* () {})() }));
-    await expect((async () => { for await (const _ of query({ prompt: "p" })) void _; })()).rejects.toThrow(
-      new ProviderError(CLAUDE_NOT_FOUND_MESSAGE, "claude"),
-    );
-  });
-});
-
 const hunk = (id: string, file: string, at = "@@ -1 +1 @@"): Hunk => {
   const header = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n`;
   return { id, file, status: "modified", header, patch: `${header}${at}\n-x\n+y\n` };
 };
 
-function setup(over: Partial<ControllerDeps> = {}, provider?: Provider) {
+const goodPlan = JSON.stringify({
+  stages: [
+    { header: "feat(a): change a", files: { "a.ts": "A line changed." } },
+    { header: "fix(b): change b", files: { "b.ts": "A line changed." } },
+  ],
+});
+
+function memorySource(text: string | (() => string)): PlanSource & { reports: unknown[] } {
+  const reports: unknown[] = [];
+  return {
+    reports,
+    readPlan: async () => (typeof text === "string" ? text : text()),
+    report: async (r) => void reports.push(r),
+  };
+}
+
+function setup(over: Partial<ControllerDeps> = {}) {
   const posted: HostToWebview[] = [];
   const hunks = [hunk("h1", "a.ts"), hunk("h2", "b.ts", "@@ -5,2 +7,3 @@")];
   const git: GitPort = {
@@ -181,23 +151,11 @@ function setup(over: Partial<ControllerDeps> = {}, provider?: Provider) {
     commit: vi.fn(async () => {}),
   };
   const host = { post: (m: HostToWebview) => void posted.push(m), showError: vi.fn(), openFile: vi.fn(async () => {}) };
-  const fake: Provider = provider ?? {
-    id: "fake",
-    generatePlan: async () =>
-      JSON.stringify({
-        stages: [
-          { type: "feat", scope: "a", description: "change a", hunks: [{ id: "h1", summary: "A line changed.", needs: [] }] },
-          { type: "fix", scope: "b", description: "change b", hunks: [{ id: "h2", summary: "A line changed.", needs: ["h1"] }] },
-        ],
-      }),
-  };
   const controller = new ReviewController({
     git,
     repoRoot: async () => "/repo",
     scratchIndex: { apply: async (hs) => hs.map((h) => ({ id: h.id, ok: true as const })) },
-    readSettings: () => ({ provider: "fake", model: "m", maxAttempts: 2 }),
-    resolveProvider: () => fake,
-    loadSkill: async () => ({ body: "s", references: {} }),
+    planSource: memorySource(goodPlan),
     host,
     ...over,
   });
@@ -205,20 +163,10 @@ function setup(over: Partial<ControllerDeps> = {}, provider?: Provider) {
 }
 
 describe("ReviewController", () => {
-  it("posts loading, generating, then review", async () => {
+  it("posts loading, then review", async () => {
     const { controller, posted } = setup();
     await controller.start();
-    expect(posted.map((m) => m.type)).toEqual(["loading", "generating", "review"]);
-  });
-
-  it("turns a ProviderError into a failed state and an error message", async () => {
-    const { controller, posted, host } = setup(
-      {},
-      { id: "x", generatePlan: async () => { throw new ProviderError("not signed in", "x"); } },
-    );
-    await controller.start();
-    expect(posted.at(-1)).toEqual({ type: "failed", problems: [{ field: "review", message: "not signed in" }] });
-    expect(host.showError).toHaveBeenCalledWith("diff-boss: not signed in");
+    expect(posted.map((m) => m.type)).toEqual(["loading", "review"]);
   });
 
   it("turns a GitCommandError into a failed state", async () => {
@@ -229,10 +177,12 @@ describe("ReviewController", () => {
     expect(host.showError).toHaveBeenCalledWith("diff-boss: Git failed: fatal: not a repo");
   });
 
-  it("posts the last problems when attempts run out", async () => {
-    const { controller, posted } = setup({}, { id: "x", generatePlan: async () => "not json" });
+  it("posts and reports the problems of a rejected plan", async () => {
+    const planSource = memorySource("not json");
+    const { controller, posted } = setup({ planSource });
     await controller.start();
     expect(posted.at(-1)).toMatchObject({ type: "failed" });
+    expect(planSource.reports).toEqual([{ ok: false, problems: [expect.objectContaining({ field: "json" })] }]);
   });
 
   it("acts on stored patches and never recollects", async () => {
@@ -254,11 +204,11 @@ describe("ReviewController", () => {
     expect(git.checkApplies).toHaveBeenCalledTimes(1);
   });
 
-  it("discards only after confirm, with dependents", async () => {
+  it("discards only after confirm", async () => {
     const { controller, git, posted } = setup();
     await controller.start();
     await controller.handleMessage({ type: "requestDiscard", hunkId: "h1" });
-    expect(posted.at(-1)).toEqual({ type: "confirmDiscard", hunkId: "h1", dependents: [2] });
+    expect(posted.at(-1)).toEqual({ type: "confirmDiscard", hunkId: "h1" });
     expect(git.discard).not.toHaveBeenCalled();
     await controller.handleMessage({ type: "confirmDiscard", hunkId: "h1" });
     expect(git.checkApplies).toHaveBeenCalledWith(expect.objectContaining({ id: "h1" }), "discard");
@@ -388,46 +338,18 @@ describe("ReviewController", () => {
 });
 
 describe("agent handoff", () => {
-  const goodPlan = JSON.stringify({
-    stages: [
-      { type: "feat", scope: "a", description: "change a", hunks: [{ id: "h1", summary: "A line changed.", needs: [] }] },
-      { type: "fix", scope: "b", description: "change b", hunks: [{ id: "h2", summary: "A line changed.", needs: ["h1"] }] },
-    ],
-  });
-
-  it("indexes hunks by id with their @@ line and first change, without patch bodies", () => {
-    const index = buildHunkIndex({ hunks: [hunk("h1", "a.ts", "@@ -3 +3 @@ fn()")], recentCommits: ["feat: x"] }, "/g/diff-boss", "/ext/skill");
-    expect(index).toEqual({
-      skill: "/ext/skill/SKILL.md",
-      planFile: "/g/diff-boss/plan.json",
-      resultFile: "/g/diff-boss/result.json",
-      recentCommits: ["feat: x"],
-      hunks: [{ id: "h1", file: "a.ts", status: "modified", at: "@@ -3 +3 @@ fn()", firstChange: "-x" }],
-    });
-  });
-
-  it("puts the handoff directory inside the git dir and clears an old plan and result", async () => {
+  it("puts the handoff directory inside the git dir", async () => {
     const repo = tmp();
     await runGitChecked(["init", "-q"], { cwd: repo });
-    const dir = await handoffDir(repo);
-    expect(dir).toBe(join(repo, ".git", "diff-boss"));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, PLAN_FILE), "old");
-    writeFileSync(join(dir, RESULT_FILE), "old");
-    await writeHunkIndex(dir, buildHunkIndex({ hunks: [], recentCommits: [] }, dir, "/s"));
-    expect(existsSync(join(dir, PLAN_FILE))).toBe(false);
-    expect(existsSync(join(dir, RESULT_FILE))).toBe(false);
-    expect(JSON.parse(readFileSync(join(dir, HUNKS_FILE), "utf8")).hunks).toEqual([]);
+    expect(await handoffDir(repo)).toBe(join(repo, ".git", "diff-boss"));
     rmSync(repo, { recursive: true, force: true });
   });
 
-  it("validates the session's plan with no provider call and reports success", async () => {
+  it("validates the plan file and reports success", async () => {
     const dir = tmp();
     writeFileSync(join(dir, PLAN_FILE), goodPlan);
-    const generatePlan = vi.fn();
-    const { controller, posted } = setup({ planSource: new FilePlanSource(dir) }, { id: "x", generatePlan });
+    const { controller, posted } = setup({ planSource: new FilePlanSource(dir) });
     await controller.start();
-    expect(generatePlan).not.toHaveBeenCalled();
     expect(posted.map((m) => m.type)).toEqual(["loading", "review"]);
     expect(JSON.parse(readFileSync(join(dir, RESULT_FILE), "utf8"))).toEqual({ ok: true, stages: 2 });
     rmSync(dir, { recursive: true, force: true });
@@ -435,7 +357,7 @@ describe("agent handoff", () => {
 
   it("writes the validator's ✗ lines for the session to fix, then rereads the plan on rerun", async () => {
     const dir = tmp();
-    writeFileSync(join(dir, PLAN_FILE), JSON.stringify({ stages: [] }));
+    writeFileSync(join(dir, PLAN_FILE), JSON.stringify({ stages: [{ header: "nope", files: {} }] }));
     const { controller, posted } = setup({ planSource: new FilePlanSource(dir) });
     await controller.start();
     expect(posted.at(-1)).toMatchObject({ type: "failed" });
@@ -455,19 +377,6 @@ describe("agent handoff", () => {
     const result = JSON.parse(readFileSync(join(dir, RESULT_FILE), "utf8"));
     expect(result).toMatchObject({ ok: false });
     expect(result.problems[0]).toMatch(/No plan at/);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("switches an open review to the session's plan", async () => {
-    const dir = tmp();
-    writeFileSync(join(dir, PLAN_FILE), goodPlan);
-    const generatePlan = vi.fn(async () => goodPlan);
-    const { controller } = setup({}, { id: "x", generatePlan });
-    await controller.start();
-    controller.usePlanSource(new FilePlanSource(dir));
-    await controller.start();
-    expect(generatePlan).toHaveBeenCalledTimes(1);
-    expect(existsSync(join(dir, RESULT_FILE))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 });

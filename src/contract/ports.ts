@@ -1,5 +1,4 @@
 import type { Hunk, PlanningInput } from "./hunk";
-import type { Problem } from "./problem";
 
 export class GitCommandError extends Error {
   override readonly name = "GitCommandError";
@@ -13,44 +12,12 @@ export class GitCommandError extends Error {
   }
 }
 
-export class ProviderError extends Error {
-  override readonly name = "ProviderError";
-  constructor(
-    message: string,
-    readonly providerId: string,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-  }
-}
-
 /** Expected failure returned as a value; unexpected ones are thrown as typed errors. */
 export type ApplyResult = { ok: true } | { ok: false; reason: string };
 
 export type HunkApplyResult = { id: string } & ApplyResult;
 
 export type HunkAction = "stage" | "unstage" | "discard";
-
-export interface Skill {
-  body: string;
-  references: Record<string, string>;
-}
-
-export interface Provider {
-  readonly id: string;
-  /** Returns raw model text. Parsing and validation belong to the plan layer. */
-  generatePlan(
-    input: PlanningInput,
-    skill: Skill,
-    previousProblems?: readonly Problem[],
-  ): Promise<string>;
-}
-
-export interface ProviderRegistry {
-  register(provider: Provider): void;
-  get(id: string): Provider | undefined;
-  list(): string[];
-}
 
 export interface ScratchIndex {
   /**

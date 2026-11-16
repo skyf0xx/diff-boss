@@ -5,8 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { HostToWebview, ReviewState } from "../../contract/messages";
-import type { PlanningInput } from "../../contract/hunk";
-import type { Provider } from "../../contract/ports";
 import type { DiffBossApi, DiffBossTestApi } from "../activate";
 
 const EXTENSION_ID = "diff-boss.diff-boss";
@@ -38,30 +36,17 @@ function makeRepo(name?: string): string {
   return dir;
 }
 
-/** One stage per hunk; the second hunk needs the first. Never calls a model. */
-const fakeProvider: Provider = {
-  id: "fake",
-  async generatePlan(input: PlanningInput): Promise<string> {
-    const [first, second] = input.hunks;
-    if (!first || !second) throw new Error("fake provider expects two hunks");
-    return JSON.stringify({
-      stages: [
-        {
-          type: "feat",
-          scope: "first",
-          description: "change the first file",
-          hunks: [{ id: first.id, summary: "One line in the first file changed.", needs: [] }],
-        },
-        {
-          type: "fix",
-          scope: "second",
-          description: "change the second file",
-          hunks: [{ id: second.id, summary: "One line in the second file changed.", needs: [first.id] }],
-        },
-      ],
-    });
-  },
+const PLAN = {
+  stages: [
+    { header: "feat(first): change the first file", files: { "a.txt": "One line in the first file changed." } },
+    { header: "fix(second): change the second file", files: { "b.txt": "One line in the second file changed." } },
+  ],
 };
+
+function writePlan(dir: string, plan: unknown = PLAN): void {
+  mkdirSync(join(dir, ".git", "diff-boss"), { recursive: true });
+  writeFileSync(join(dir, ".git", "diff-boss", "plan.json"), JSON.stringify(plan));
+}
 
 let api: DiffBossTestApi;
 let seen: HostToWebview[] = [];
@@ -70,6 +55,7 @@ const repos: string[] = [];
 
 async function newRepoInWorkspace(name?: string): Promise<string> {
   const dir = makeRepo(name);
+  writePlan(dir);
   repos.push(name ? join(dir, "..") : dir);
   api.overrideWorkspaceFolders([dir]);
   return dir;
@@ -91,15 +77,6 @@ async function startReview(dir: string) {
 }
 
 suite("diff-boss extension", () => {
-  suiteSetup(async () => {
-    const config = vscode.workspace.getConfiguration("diffBoss");
-    await config.update("provider", "fake", vscode.ConfigurationTarget.Global);
-  });
-
-  suiteTeardown(async () => {
-    await vscode.workspace.getConfiguration("diffBoss").update("provider", undefined, vscode.ConfigurationTarget.Global);
-  });
-
   setup(() => {
     seen = [];
     if (api) unobserve = api.observe((m) => seen.push(m));
@@ -114,35 +91,15 @@ suite("diff-boss extension", () => {
     }
   });
 
-  test("the review command is contributed and activates the extension", async () => {
+  test("the extension contributes nothing and activates on a link", async () => {
     const ext = vscode.extensions.getExtension<DiffBossApi>(EXTENSION_ID);
     assert.ok(ext, "extension is installed in the test host");
-    const contributed = (ext.packageJSON as { contributes: { commands: { command: string; title: string }[] } })
-      .contributes.commands;
-    assert.deepStrictEqual(contributed, [
-      { command: "diffBoss.review", title: "diff-boss: Review unstaged changes" },
-    ]);
+    const pkg = ext.packageJSON as { contributes?: unknown; activationEvents: string[] };
+    assert.strictEqual(pkg.contributes, undefined);
+    assert.deepStrictEqual(pkg.activationEvents, ["onUri"]);
     assert.strictEqual(ext.isActive, false, "extension loads lazily");
-
-    await vscode.commands.executeCommand("diffBoss.review");
-    assert.strictEqual(ext.isActive, true);
-    api = ext.exports.test;
-    assert.ok((await vscode.commands.getCommands(true)).includes("diffBoss.review"));
-
-    api.registerProvider(fakeProvider);
-    const controller = api.controller();
-    assert.ok(controller, "the command opened a review panel");
-    await controller.idle();
-    api.closePanel();
-  });
-
-  test("settings are declared with the expected defaults and no key setting", () => {
-    const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
-    const props = (ext.packageJSON as { contributes: { configuration: { properties: Record<string, { default: unknown }> } } })
-      .contributes.configuration.properties;
-    assert.deepStrictEqual(Object.keys(props).sort(), ["diffBoss.maxAttempts", "diffBoss.model", "diffBoss.provider"]);
-    assert.strictEqual(props["diffBoss.model"]!.default, "sonnet");
-    assert.strictEqual(props["diffBoss.maxAttempts"]!.default, 3);
+    api = (await ext.activate()).test;
+    unobserve = api.observe((m) => seen.push(m));
   });
 
   test("a review of a repo with two changes produces a review state", async () => {
@@ -150,7 +107,6 @@ suite("diff-boss extension", () => {
     await startReview(dir);
 
     assert.strictEqual(seen[0]?.type, "loading");
-    assert.ok(seen.some((m) => m.type === "generating" && m.attempt === 1));
     const state = lastReview();
     assert.deepStrictEqual(
       state.stages.map((s) => s.header),
@@ -160,33 +116,23 @@ suite("diff-boss extension", () => {
       state.stages.flatMap((s) => s.hunks.map((h) => h.file)).sort(),
       ["a.txt", "b.txt"],
     );
-    assert.deepStrictEqual(state.stages[1]!.hunks[0]!.needs, [1]);
+    assert.strictEqual(state.stages[0]!.hunks[0]!.summary, "One line in the first file changed.");
     assert.strictEqual(state.currentStage, 0);
   });
 
   test("a hard-to-read summary is accepted and carries its reading grade", async () => {
-    const hard: Provider = {
-      id: "hard",
-      async generatePlan(input: PlanningInput): Promise<string> {
-        const plan = JSON.parse(await fakeProvider.generatePlan(input, { body: "", references: {} }));
-        plan.stages[0].hunks[0].summary =
-          "Configuration initialization necessitates considerable architectural deliberation.";
-        return JSON.stringify(plan);
-      },
-    };
-    api.registerProvider(hard);
-    const config = vscode.workspace.getConfiguration("diffBoss");
-    await config.update("provider", "hard", vscode.ConfigurationTarget.Global);
-    try {
-      const dir = await newRepoInWorkspace();
-      await startReview(dir);
-      assert.ok(!seen.some((m) => m.type === "failed"), "a high grade does not fail the plan");
-      const hunks = lastReview().stages.flatMap((s) => s.hunks);
-      assert.ok((hunks[0]!.readabilityGrade ?? 0) > 8, "the first hunk carries its grade");
-      assert.strictEqual(hunks[1]!.readabilityGrade, undefined);
-    } finally {
-      await config.update("provider", "fake", vscode.ConfigurationTarget.Global);
-    }
+    const dir = await newRepoInWorkspace();
+    writePlan(dir, {
+      stages: [
+        { header: "feat: a", files: { "a.txt": "Configuration initialization necessitates considerable architectural deliberation." } },
+        { header: "feat: b", files: { "b.txt": "B changed." } },
+      ],
+    });
+    await startReview(dir);
+    assert.ok(!seen.some((m) => m.type === "failed"), "a high grade does not fail the plan");
+    const hunks = lastReview().stages.flatMap((s) => s.hunks);
+    assert.ok((hunks[0]!.readabilityGrade ?? 0) > 8, "the first hunk carries its grade");
+    assert.strictEqual(hunks[1]!.readabilityGrade, undefined);
   });
 
   test("ready replays the current state", async () => {
@@ -232,7 +178,7 @@ suite("diff-boss extension", () => {
     assert.strictEqual(git(dir, "rev-list", "--count", "HEAD").trim(), "1");
   });
 
-  test("discard asks first, names dependents, and reverts after confirm", async () => {
+  test("discard asks first and reverts after confirm", async () => {
     const dir = await newRepoInWorkspace();
     const controller = await startReview(dir);
     const first = lastReview().stages[0]!.hunks[0]!;
@@ -242,7 +188,7 @@ suite("diff-boss extension", () => {
 
     await controller.handleMessage({ type: "requestDiscard", hunkId: first.id });
     const confirm = seen.at(-1);
-    assert.deepStrictEqual(confirm, { type: "confirmDiscard", hunkId: first.id, dependents: [2] });
+    assert.deepStrictEqual(confirm, { type: "confirmDiscard", hunkId: first.id });
     assert.strictEqual(readFileSync(join(dir, first.file), "utf8"), edited, "nothing discarded before confirm");
 
     await controller.handleMessage({ type: "confirmDiscard", hunkId: first.id });
@@ -360,31 +306,27 @@ suite("diff-boss extension", () => {
     const before = api.panelsCreated();
     const second = await api.launch(dir);
     await api.handleUri(vscode.Uri.parse(`vscode://${EXTENSION_ID}/review`));
-    await vscode.commands.executeCommand("diffBoss.review");
     assert.strictEqual(second, first);
     assert.strictEqual(api.panelsCreated(), before);
   });
 
-  test("an agent session prepares, writes its own plan and opens the review with no provider call", async () => {
+  test("the review link validates the plan file and reports the result", async () => {
     const dir = await newRepoInWorkspace();
-    const link = (route: string) => vscode.Uri.parse(`vscode://${EXTENSION_ID}/${route}?path=${encodeURIComponent(dir)}`);
-    await api.handleUri(link("prepare"));
-    const index = JSON.parse(readFileSync(join(dir, ".git", "diff-boss", "hunks.json"), "utf8")) as {
-      hunks: { id: string }[];
-      planFile: string;
-      resultFile: string;
-      skill: string;
-    };
-    assert.strictEqual(index.hunks.length, 2);
-    assert.ok(readFileSync(index.skill, "utf8").includes("diff-boss-plan"), "the index points at the planning skill");
-    const plan = JSON.parse(await fakeProvider.generatePlan({ hunks: index.hunks as never, recentCommits: [] }, { body: "", references: {} }));
-    writeFileSync(index.planFile, JSON.stringify(plan));
-    await api.handleUri(link("review-plan"));
-    const controller = api.controller();
-    assert.ok(controller);
-    await controller.idle();
-    assert.strictEqual(lastReview().stages.length, 2);
-    assert.ok(!seen.some((m) => m.type === "generating"), "no provider call");
-    assert.deepStrictEqual(JSON.parse(readFileSync(index.resultFile, "utf8")), { ok: true, stages: 2 });
+    const result = join(dir, ".git", "diff-boss", "result.json");
+    writePlan(dir, { stages: [{ header: "bad", files: {} }] });
+    await api.handleUri(vscode.Uri.parse(`vscode://${EXTENSION_ID}/review?path=${encodeURIComponent(dir)}`));
+    await api.controller()!.idle();
+    assert.strictEqual(JSON.parse(readFileSync(result, "utf8")).ok, false);
+
+    writePlan(dir);
+    await api.handleUri(vscode.Uri.parse(`vscode://${EXTENSION_ID}/review?path=${encodeURIComponent(dir)}`));
+    await api.controller()!.idle();
+    assert.deepStrictEqual(JSON.parse(readFileSync(result, "utf8")), { ok: true, stages: 2 });
+  });
+
+  test("an unknown link is refused", async () => {
+    const before = api.panelsCreated();
+    await api.handleUri(vscode.Uri.parse(`vscode://${EXTENSION_ID}/prepare`));
+    assert.strictEqual(api.panelsCreated(), before);
   });
 });

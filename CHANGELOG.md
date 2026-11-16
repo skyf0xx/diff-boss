@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- The agent session is the only planner. The Claude Agent SDK provider, its settings and the `diffBoss.review` command are gone; the extension activates only on its URI.
+- One link, `vscode://diff-boss.diff-boss/review?path=<repo>`, replaces `/prepare` and `/review-plan`. There is no hunk index.
+- The plan is `{ stages: [{ header, files }] }`. A `files` key is a path, which claims the file's remaining hunks, or `path#n`, which claims one hunk; the value is the summary. Unclaimed hunks go to a final `chore: unplanned changes` stage.
+- Summaries are optional and no longer limited in length. `needs`, "Needs hunk n" labels and the discard dependents warning are removed.
+- The planning skill and its references no longer ship in the extension; `agent-skill/SKILL.md` holds the few rules a session needs.
+
 ## 0.1.0
 
 - Diff view with old and new line numbers, a coloured change bar in place of `+`/`-`, changed-word highlights and syntax colouring.

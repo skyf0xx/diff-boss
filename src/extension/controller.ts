@@ -1,11 +1,10 @@
-import { GitCommandError, ProviderError } from "../contract/ports";
-import type { GitPort, Provider, ScratchIndex, Skill } from "../contract/ports";
+import { GitCommandError } from "../contract/ports";
+import type { GitPort, ScratchIndex } from "../contract/ports";
 import type { Hunk } from "../contract/hunk";
 import { WebviewToHostSchema } from "../contract/messages";
 import type { HostToWebview, ReviewState } from "../contract/messages";
 import type { Problem } from "../contract/problem";
-import { buildReviewState, dependentsOf, runPlanner, validatePlan } from "../plan";
-import type { Settings } from "./settings";
+import { buildReviewState, validatePlan } from "../plan";
 import { firstNewLine } from "./hunk-location";
 
 export interface ControllerHost {
@@ -24,18 +23,13 @@ export interface ControllerDeps {
   git: GitPort;
   repoRoot(): Promise<string>;
   scratchIndex: ScratchIndex;
-  readSettings(): Settings;
-  resolveProvider(settings: Settings): Provider;
-  loadSkill(): Promise<Skill>;
   host: ControllerHost;
-  /** When set, the review validates this plan and makes no provider call. */
-  planSource?: PlanSource;
+  planSource: PlanSource;
 }
 
 type View = Exclude<HostToWebview, { type: "stale" | "confirmDiscard" }>;
 
 function describe(err: unknown): string {
-  if (err instanceof ProviderError) return err.message;
   if (err instanceof GitCommandError) return `Git failed: ${err.stderr.trim() || err.message}`;
   return err instanceof Error ? err.message : String(err);
 }
@@ -51,16 +45,7 @@ export class ReviewController {
   private disposed = false;
   private pendingDiscard: string | undefined;
 
-  private planSource: PlanSource | undefined;
-
-  constructor(private readonly deps: ControllerDeps) {
-    this.planSource = deps.planSource;
-  }
-
-  /** Switches where the next `start()` gets its plan: a plan source, or the provider when undefined. */
-  usePlanSource(source: PlanSource | undefined): void {
-    this.planSource = source;
-  }
+  constructor(private readonly deps: ControllerDeps) {}
 
   /** Starts a fresh session; any run still in flight is abandoned. */
   start(): Promise<void> {
@@ -145,55 +130,36 @@ export class ReviewController {
   }
 
   private async plan(run: number): Promise<void> {
-    const source = this.planSource;
+    const source = this.deps.planSource;
     try {
-      const outcome = source ? await this.validateFrom(source) : await this.generate(run);
-      if (run !== this.generation || !outcome) return;
+      const outcome = await this.validateFrom(source);
+      if (run !== this.generation) return;
       if (!outcome.result.ok) {
-        await source?.report({ ok: false, problems: outcome.result.problems });
+        await source.report({ ok: false, problems: outcome.result.problems });
         this.emitView({ type: "failed", problems: outcome.result.problems });
         return;
       }
-      const { plan, warnings } = outcome.result;
+      const { stages, warnings } = outcome.result;
       this.hunks = new Map(outcome.input.hunks.map((h) => [h.id, h]));
-      this.state = buildReviewState(plan, outcome.input.hunks, warnings);
-      await source?.report({ ok: true, stages: plan.stages.length });
+      this.state = buildReviewState(stages, outcome.input.hunks, warnings);
+      await source.report({ ok: true, stages: stages.length });
       this.emitState();
     } catch (err) {
       if (run !== this.generation) return;
       const message = describe(err);
       const problems = [{ field: "review", message }];
-      await source?.report({ ok: false, problems }).catch(() => {});
+      await source.report({ ok: false, problems }).catch(() => {});
       this.emitView({ type: "failed", problems });
       this.deps.host.showError(`diff-boss: ${message}`);
     }
-  }
-
-  private async generate(run: number) {
-    const settings = this.deps.readSettings();
-    const provider = this.deps.resolveProvider(settings);
-    const input = await this.deps.git.collect();
-    const skill = await this.deps.loadSkill();
-    if (run !== this.generation) return undefined;
-    const result = await runPlanner({
-      provider,
-      skill,
-      input,
-      scratchIndex: this.deps.scratchIndex,
-      maxAttempts: settings.maxAttempts,
-      onProgress: (attempt, maxAttempts) => {
-        if (run === this.generation) this.emitView({ type: "generating", attempt, maxAttempts });
-      },
-    });
-    return { input, result };
   }
 
   private async validateFrom(source: PlanSource) {
     const input = await this.deps.git.collect();
     const raw = await source.readPlan();
     const validation = await validatePlan(raw, input, this.deps.scratchIndex);
-    const result = validation.plan
-      ? { ok: true as const, plan: validation.plan, warnings: validation.warnings }
+    const result = validation.stages
+      ? { ok: true as const, stages: validation.stages, warnings: validation.warnings }
       : { ok: false as const, problems: validation.problems };
     return { input, result };
   }
@@ -240,7 +206,7 @@ export class ReviewController {
       return;
     }
     this.pendingDiscard = hunkId;
-    this.post({ type: "confirmDiscard", hunkId, dependents: dependentsOf(this.state, hunkId) });
+    this.post({ type: "confirmDiscard", hunkId });
   }
 
   private isStaged(hunkId: string): boolean {

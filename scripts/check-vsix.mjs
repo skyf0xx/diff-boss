@@ -52,10 +52,6 @@ const required = [
   'extension/package.json',
   'extension/dist/extension.js',
   'extension/dist/webview/index.html',
-  'extension/skill/SKILL.md',
-  'extension/skill/references/PLAN.md',
-  'extension/skill/references/STAGES.md',
-  'extension/skill/references/WRITING.md',
 ];
 for (const r of required) if (!names.has(r)) fail(`missing ${r}`);
 if (!zip.names.some((n) => /^extension\/dist\/webview\/assets\/[^/]+\.js$/.test(n))) {
@@ -71,7 +67,7 @@ if (names.has('extension/package.json')) {
   try {
     const pkg = JSON.parse(zip.read('extension/package.json').toString('utf8'));
     const events = pkg.activationEvents ?? [];
-    for (const ev of ['onCommand:diffBoss.review', 'onUri']) {
+    for (const ev of ['onUri']) {
       if (!events.includes(ev)) fail(`package.json activationEvents lacks ${ev}`);
     }
   } catch (e) {

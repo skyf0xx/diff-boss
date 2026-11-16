@@ -23,7 +23,6 @@ function hunk(n: number, over: Record<string, unknown> = {}) {
     status: "modified" as const,
     patch: PATCH,
     summary: `Summary ${n}.`,
-    needs: [] as number[],
     staged: false,
     ...over,
   };
@@ -37,13 +36,13 @@ function state(over: Partial<ReviewState> = {}): ReviewState {
         header: "feat(balance): validate token ids",
         commitMessage: "feat(balance): validate token ids",
         committed: false,
-        hunks: [hunk(1), hunk(2, { needs: [1], staged: true })],
+        hunks: [hunk(1), hunk(2, { staged: true })],
       },
       {
         header: "fix(ui): align labels",
         commitMessage: "fix(ui): align labels",
         committed: false,
-        hunks: [hunk(3, { needs: [1, 2] })],
+        hunks: [hunk(3, { summary: "" })],
       },
     ],
     ...over,
@@ -81,7 +80,7 @@ describe("startup", () => {
     host({ type: "nonsense" });
     host("hello");
     host(null);
-    host({ type: "generating", attempt: "x" });
+    host({ type: "confirmDiscard" });
     expect(screen.getByRole("status").textContent).toContain("Collecting");
   });
 });
@@ -98,25 +97,6 @@ describe("readability", () => {
 });
 
 describe("states", () => {
-  it("shows generating attempts", () => {
-    host({ type: "generating", attempt: 2, maxAttempts: 3 });
-    expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3");
-  });
-
-  it("counts the seconds of each attempt and restarts on the next one", () => {
-    vi.useFakeTimers();
-    try {
-      host({ type: "generating", attempt: 1, maxAttempts: 3 });
-      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 0 s");
-      act(() => void vi.advanceTimersByTime(3000));
-      expect(screen.getByRole("status").textContent).toContain("attempt 1 of 3 · 3 s");
-      host({ type: "generating", attempt: 2, maxAttempts: 3 });
-      expect(screen.getByRole("status").textContent).toContain("attempt 2 of 3 · 0 s");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("lists failed problems and reruns", async () => {
     host({ type: "failed", problems: [{ field: "order", message: "hunk h1 does not apply" }] });
     expect(screen.getByText("✗ order: hunk h1 does not apply")).toBeTruthy();
@@ -141,9 +121,8 @@ describe("review state", () => {
     expect(within(c1).getByRole("button", { name: "Stage hunk" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Discard" })).toBeTruthy();
     expect(within(c1).getByRole("button", { name: "Open file ↗" })).toBeTruthy();
-    expect(within(card(2)).getByText("Needs hunk 1")).toBeTruthy();
-    expect(within(card(3)).getByText("Needs hunk 1")).toBeTruthy();
-    expect(within(card(3)).getByText("Needs hunk 2")).toBeTruthy();
+    expect(within(card(2)).getByText("Summary 2.")).toBeTruthy();
+    expect(card(3).querySelector(".card-summary")).toBeNull();
     expect(screen.getByRole("button", { name: "Commit feat" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Commit fix" })).toBeTruthy();
     const fields = screen.getAllByLabelText("Commit message") as HTMLInputElement[];
@@ -203,31 +182,21 @@ describe("actions", () => {
 });
 
 describe("discard", () => {
-  it("requests, then confirms with dependents named", async () => {
+  it("requests, then confirms", async () => {
     review();
     await userEvent.click(within(card(1)).getByRole("button", { name: "Discard" }));
     expect(sent.at(-1)).toEqual({ type: "requestDiscard", hunkId: "h1" });
-    host({ type: "confirmDiscard", hunkId: "h1", dependents: [4, 6] });
+    host({ type: "confirmDiscard", hunkId: "h1" });
     const dialog = within(card(1)).getByRole("alertdialog");
-    expect(dialog.textContent).toContain("Hunks 4 and 6 need this hunk.");
+    expect(dialog.textContent).toContain("Discard this hunk?");
     await userEvent.click(within(dialog).getByRole("button", { name: "Confirm discard" }));
     expect(sent.at(-1)).toEqual({ type: "confirmDiscard", hunkId: "h1" });
     expect(within(card(1)).queryByRole("alertdialog")).toBeNull();
   });
 
-  it("shows a plain confirm without dependents", async () => {
-    review();
-    host({ type: "confirmDiscard", hunkId: "h1", dependents: [] });
-    const dialog = within(card(1)).getByRole("alertdialog");
-    expect(dialog.textContent).not.toMatch(/need/);
-    expect(dialog.textContent).toContain("Discard this hunk?");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm discard" }));
-    expect(sent.at(-1)).toEqual({ type: "confirmDiscard", hunkId: "h1" });
-  });
-
   it("sends nothing on cancel", async () => {
     review();
-    host({ type: "confirmDiscard", hunkId: "h1", dependents: [4] });
+    host({ type: "confirmDiscard", hunkId: "h1" });
     const before = sent.length;
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(sent.length).toBe(before);
@@ -263,7 +232,7 @@ describe("stale", () => {
 
   it("drops a pending discard confirm", () => {
     review();
-    host({ type: "confirmDiscard", hunkId: "h1", dependents: [] });
+    host({ type: "confirmDiscard", hunkId: "h1" });
     host({ type: "stale" });
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });

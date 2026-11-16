@@ -2,21 +2,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { HostToWebview } from "../contract/messages";
-import type { Provider } from "../contract/ports";
 import { GitCliPort, GitScratchIndex } from "../git";
-import { createDefaultRegistry, loadSkill } from "../providers";
-import { createClaudeQuery } from "./claude-runtime";
 import { ReviewController } from "./controller";
-import { FilePlanSource, buildHunkIndex, handoffDir, writeHunkIndex } from "./handoff";
+import { FilePlanSource, handoffDir } from "./handoff";
 import { ReviewPanel } from "./panel";
-import { readSettings } from "./settings";
 
-export const REVIEW_COMMAND = "diffBoss.review";
+/** Validates `<git-dir>/diff-boss/plan.json` and opens the review with it. */
 export const REVIEW_URI_PATH = "/review";
-/** Writes the hunk index an agent session plans from. */
-export const PREPARE_URI_PATH = "/prepare";
-/** Opens the review with the plan the agent session wrote, with no provider call. */
-export const REVIEW_PLAN_URI_PATH = "/review-plan";
 
 export class LaunchRefusedError extends Error {
   override readonly name = "LaunchRefusedError";
@@ -53,7 +45,6 @@ export function resolveRepoPath(requested: string | undefined, folders: readonly
   return real;
 }
 
-/** Reads the `path` query parameter, keeping `+` literal (a path is not form-encoded). */
 /**
  * `path` is the link's only parameter, so its value is everything after `path=`. `query` is
  * `vscode.Uri.query`, which VS Code has already percent-decoded, so `&`, `+` and `%` in the
@@ -66,8 +57,6 @@ export function parsePathParam(query: string): string | undefined {
 }
 
 export interface DiffBossTestApi {
-  /** Makes `diffBoss.provider` accept this provider's id. Test seam: no model calls. */
-  registerProvider(provider: Provider): void;
   /** Same entry point the URI handler uses. */
   handleUri(uri: vscode.Uri): Promise<void>;
   launch(repoPath?: string): Promise<ReviewController | undefined>;
@@ -94,7 +83,6 @@ interface OpenReview {
 }
 
 export function activate(context: vscode.ExtensionContext): DiffBossApi {
-  const extraProviders: Provider[] = [];
   const observers = new Set<(message: HostToWebview) => void>();
   let open: OpenReview | undefined;
   let panelsCreated = 0;
@@ -107,28 +95,24 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
   const workspaceFolders = () =>
     folderOverride ?? (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
 
-  const skillDir = () => path.join(context.extensionPath, "skill");
   const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-  async function launch(requested?: string, fromAgent = false): Promise<ReviewController | undefined> {
+  async function launch(requested?: string): Promise<ReviewController | undefined> {
     let repo: string;
-    let planSource: FilePlanSource | undefined;
+    let planSource: FilePlanSource;
     try {
-      repo = open && !requested ? open.repo : resolveRepoPath(requested, workspaceFolders());
-      if (fromAgent) planSource = new FilePlanSource(await handoffDir(repo));
+      repo = resolveRepoPath(requested, workspaceFolders());
+      planSource = new FilePlanSource(await handoffDir(repo));
     } catch (err) {
       showError(`diff-boss: ${errorText(err)}`);
       return undefined;
     }
-    if (open && fromAgent && open.repo !== repo) {
+    if (open && open.repo !== repo) {
       open.panel.dispose();
       open = undefined;
     }
     if (open) {
-      if (fromAgent) {
-        open.controller.usePlanSource(planSource);
-        void open.controller.start();
-      }
+      void open.controller.start();
       open.panel.reveal();
       return open.controller;
     }
@@ -139,21 +123,6 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
       git,
       repoRoot: () => git.root(),
       scratchIndex: new GitScratchIndex(repo),
-      readSettings: () => readSettings(vscode.workspace.getConfiguration("diffBoss")),
-      resolveProvider: (settings) => {
-        const registry = createDefaultRegistry({
-          claude: { model: settings.model, query: createClaudeQuery(), cwd: repo },
-        });
-        for (const p of extraProviders) registry.register(p);
-        const provider = registry.get(settings.provider);
-        if (!provider) {
-          throw new Error(
-            `No provider "${settings.provider}" is registered (available: ${registry.list().join(", ")})`,
-          );
-        }
-        return provider;
-      },
-      loadSkill: () => loadSkill(skillDir()),
       planSource,
       host: {
         post: (message) => {
@@ -190,31 +159,9 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
     return controller;
   }
 
-  async function prepare(requested?: string): Promise<void> {
-    let dir: string | undefined;
-    try {
-      const repo = resolveRepoPath(requested, workspaceFolders());
-      dir = await handoffDir(repo);
-      const input = await new GitCliPort(repo).collect();
-      await writeHunkIndex(dir, buildHunkIndex(input, dir, skillDir()));
-      vscode.window.setStatusBarMessage(`diff-boss: ${input.hunks.length} hunks ready for planning`, 5000);
-    } catch (err) {
-      const message = errorText(err);
-      if (dir) await new FilePlanSource(dir).report({ ok: false, problems: [{ field: "prepare", message }] }).catch(() => {});
-      showError(`diff-boss: ${message}`);
-    }
-  }
-
-  const routes: Record<string, (requested: string | undefined) => Promise<unknown>> = {
-    [REVIEW_URI_PATH]: (requested) => launch(requested),
-    [PREPARE_URI_PATH]: (requested) => prepare(requested),
-    [REVIEW_PLAN_URI_PATH]: (requested) => launch(requested, true),
-  };
-
   async function handleUri(uri: vscode.Uri): Promise<void> {
-    const route = routes[uri.path];
-    if (!route) {
-      showError(`diff-boss: unknown link ${uri.path}; expected one of ${Object.keys(routes).join(", ")}`);
+    if (uri.path !== REVIEW_URI_PATH) {
+      showError(`diff-boss: unknown link ${uri.path}; expected ${REVIEW_URI_PATH}`);
       return;
     }
     let requested: string | undefined;
@@ -224,20 +171,16 @@ export function activate(context: vscode.ExtensionContext): DiffBossApi {
       showError("diff-boss: the link has a malformed path");
       return;
     }
-    await route(requested);
+    await launch(requested);
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(REVIEW_COMMAND, () => launch()),
     vscode.window.registerUriHandler({ handleUri }),
     { dispose: () => open?.panel.dispose() },
   );
 
   return {
     test: {
-      registerProvider: (provider) => {
-        extraProviders.push(provider);
-      },
       handleUri,
       launch,
       controller: () => open?.controller,

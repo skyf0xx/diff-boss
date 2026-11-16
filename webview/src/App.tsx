@@ -13,20 +13,8 @@ import type { VsCodeApi } from "./vscode";
 
 type View =
   | { kind: "loading" }
-  | { kind: "generating"; attempt: number; maxAttempts: number }
   | { kind: "failed"; problems: Problem[] }
   | { kind: "review"; state: ReviewState };
-
-/** Seconds since this element mounted, so a long attempt visibly keeps counting. */
-function Elapsed() {
-  const [start] = useState(() => Date.now());
-  const [now, setNow] = useState(start);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="elapsed">{Math.floor((now - start) / 1000)} s</span>;
-}
 
 export function App({ api }: { api: VsCodeApi }) {
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -46,16 +34,13 @@ export function App({ api }: { api: VsCodeApi }) {
           setDiscard(undefined);
           return;
         case "confirmDiscard":
-          setDiscard({ hunkId: msg.hunkId, dependents: msg.dependents });
+          setDiscard({ hunkId: msg.hunkId });
           return;
         case "review":
           setView({ kind: "review", state: msg.state });
           break;
         case "failed":
           setView({ kind: "failed", problems: msg.problems });
-          break;
-        case "generating":
-          setView({ kind: "generating", attempt: msg.attempt, maxAttempts: msg.maxAttempts });
           break;
         case "loading":
           setView({ kind: "loading" });
@@ -83,12 +68,6 @@ export function App({ api }: { api: VsCodeApi }) {
         </div>
       )}
       {view.kind === "loading" && <p role="status">Collecting changes…</p>}
-      {view.kind === "generating" && (
-        <p role="status">
-          Generating plan: attempt {view.attempt} of {view.maxAttempts} ·{" "}
-          <Elapsed key={view.attempt} />
-        </p>
-      )}
       {view.kind === "failed" && (
         <section className="failed" aria-label="Plan failed">
           <p>The plan could not be validated.</p>
