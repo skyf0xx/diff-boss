@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0
+
+- Diff view with old and new line numbers, a coloured change bar in place of `+`/`-`, changed-word highlights and syntax colouring.
+- Agent handoff: `vscode://diff-boss.diff-boss/prepare?path=<repo>` writes a hunk index, the agent session writes the plan, and `vscode://diff-boss.diff-boss/review-plan?path=<repo>` validates it and opens the review with no provider call. `agent-skill/SKILL.md` is the Claude Code skill that runs it.
+
 ## 0.0.0 (unreleased)
 
 - Collects unstaged Git hunks (modified, added, deleted, renamed and untracked files) with ids that stay the same while the working tree is unchanged.

@@ -11,15 +11,22 @@ diff-boss is a VS Code extension that shows unstaged changes as a stage-by-stage
 
 ```bash
 REPO=$(git rev-parse --show-toplevel)
+MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 DIR="$(git rev-parse --absolute-git-dir)/diff-boss"
 ENC=$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$REPO")
 rm -rf "$DIR"
+code "$MAIN"   # brings the window that has this repository open to the front; links go to the last active window
+sleep 1.5
 code --open-url "vscode://diff-boss.diff-boss/prepare?path=$ENC"
 for i in $(seq 60); do [ -f "$DIR/hunks.json" ] || [ -f "$DIR/result.json" ] && break; sleep 0.5; done
 ls "$DIR"
 ```
 
-Use `cursor` in place of `code` if the user's editor is Cursor. If neither file appears, tell the user to focus the VS Code window that has this repository open (and accept the "open this URI" prompt the first time), then retry. If `result.json` appears instead of `hunks.json`, report its `problems` and stop.
+Use `cursor` in place of `code` if the user's editor is Cursor. If neither file appears, ask the user for the diff-boss notification in VS Code:
+
+- "unknown link /prepare": that window runs an older diff-boss. Ask the user to run **Developer: Reload Window** there, then retry.
+- "Refusing to review …": the link reached a window without this repository. Ask the user to click into the window that has it open, then retry.
+- No notification: an "open this URI" prompt may be waiting for a click. If `result.json` appears instead of `hunks.json`, report its `problems` and stop.
 
 ## 2. Read the index and the rules
 
@@ -38,6 +45,7 @@ Write the plan to `planFile` as one JSON object and nothing else. Then:
 
 ```bash
 rm -f "$DIR/result.json"
+code "$MAIN"; sleep 1.5
 code --open-url "vscode://diff-boss.diff-boss/review-plan?path=$ENC"
 for i in $(seq 60); do [ -f "$DIR/result.json" ] && break; sleep 0.5; done
 cat "$DIR/result.json"
